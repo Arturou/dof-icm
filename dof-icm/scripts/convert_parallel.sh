@@ -36,6 +36,12 @@ while true; do
     sleep "$INTERVAL"
     continue
   fi
+  # If the downloader has exited, treat position as "infinity" so the
+  # final in-flight month (e.g. 2026/12) still gets staged + converted.
+  if ! pgrep -f "get_word_dof.py" >/dev/null 2>&1; then
+    echo "[$(date +%T)] downloader process gone; final sweep (all months)"
+    cur_year="9999"; cur_month="99"
+  fi
 
   # --- 2. move completed months ---
   moved=0
