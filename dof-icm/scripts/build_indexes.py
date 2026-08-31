@@ -62,8 +62,8 @@ def main() -> None:
             continue
         year = int(m.group("year"))
         section = m.group("section")
-        day = int(m.group("day"))
-        date = dt.date(year, day // 10000, (day // 100) % 100, day % 100)
+        day8 = m.group("day")  # DDMMYYYY
+        date = dt.date(year, int(day8[2:4]), int(day8[0:2]))
         years[year][section].append((date, path))
         sections[section][year] += 1
         all_docs.append((date, path))
@@ -78,7 +78,8 @@ def main() -> None:
         for section in sorted(years[year]):
             docs = sorted(years[year][section])
             total += len(docs)
-            lines.append(f"## Section {section} — {len(docs)} documents", "")
+            lines.append(f"## Section {section} — {len(docs)} documents")
+            lines.append("")
             # Sample: first 5 + last 5 titles
             samples = docs[:5] + (docs[-5:] if len(docs) > 10 else [])
             seen: set[tuple] = set()
@@ -94,7 +95,8 @@ def main() -> None:
                 )
             lines.append("")
         # Doc counts by month
-        lines.insert(1, f"**Total: {total} documents**", "")
+        lines.insert(1, f"**Total: {total} documents**")
+        lines.insert(2, "")
         out.write_text("\n".join(lines) + "\n")
         print(f"wrote {out} ({total} docs)")
 
@@ -124,7 +126,8 @@ def main() -> None:
     for date, path in recent[:200]:
         lines.append(f"- {date.isoformat()} `{path.relative_to(corpus).as_posix()}`")
     if len(recent) > 200:
-        lines.append("", f"*…and {len(recent) - 200} more*")
+        lines.append("")
+        lines.append(f"*…and {len(recent) - 200} more*")
     out.write_text("\n".join(lines) + "\n")
     print(f"wrote {out} ({len(recent)} recent docs)")
 
