@@ -1,0 +1,127 @@
+# DOF-ICM — Portable, File-Based DOF Q&A
+
+A portable, file-based workspace for answering questions about Mexican federal law using the *Diario Oficial de la Federación* (DOF) corpus (2024–2026). **No embeddings, no vector DB, no server.** The corpus is markdown files; retrieval is a skill the agent reads; answers are markdown with citations.
+
+Built on the [Interpretable Context Methodology (ICM)](https://github.com/RinDig/Interpretable-Context-Methodology) — folder structure as agent architecture.
+
+## What it is
+
+- **A folder**, not a service. Drop it into any agent harness (Claude Code, Codex, DSH, Hermes, etc.) and it works.
+- **The corpus is the state.** One markdown file per DOF legal document, organized by `YYYY/MM/DATE/SECTION/`.
+- **Retrieval is a skill.** The agent reads a `SKILL.md` + `rules/*.md` to learn how to navigate and grep the corpus.
+- **Answers are markdown.** Every factual claim cites a specific doc (relpath + line range + date + section).
+
+## What it is not
+
+- Not a RAG pipeline. No chunking, no embeddings, no vector index.
+- Not a server. No HTTP, no API, no state to manage.
+- Not a general legal assistant. It answers questions that the 2024–2026 DOF corpus can support. If the corpus doesn't contain the answer, it says so.
+
+## Requirements
+
+- **An agent harness** that can read markdown files and execute shell commands (grep, etc.)
+- **A model** (recommended: `qwen3.8-27b` at `http://100.99.75.13:1234/v1`, `reasoning_effort=low`)
+- **The corpus** (`corpus/` folder) — either committed to the repo or downloaded via the setup script
+
+## Quickstart
+
+### 1. Get the corpus
+
+If `corpus/` is empty, run the download + convert pipeline (from the parent `dof-rag/` repo):
+
+```bash
+cd ../
+uv run get_word_dof.py 01/01/2024 31/12/2026 --editions both --sleep-delay 0.2
+uv run python convert_doc_to_md.py --input-dir ./dof_word --output-dir ./dof-icm/corpus --workers 4
+rm -rf dof_word/  # free ~20–40 GB after verified conversion
+```
+
+### 2. Configure your harness
+
+Point your agent at the `dof-icm/` folder and use this model config:
+
+```
+endpoint: http://100.99.75.13:1234/v1
+model: qwen3.8-27b
+reasoning_effort: low
+```
+
+### 3. Ask a question
+
+```
+User: ¿Cuál es el salario mínimo general diario vigente en 2026?
+
+Agent (Stage 01 — locate):
+  - Classifies: year=2026, section=MAT, terms="salario mínimo"
+  - Reads corpus/index/by-year-2026.md
+  - Greps corpus/2026/ for "salario mínimo"
+  - Writes stages/01-locate/output/salario-minimo-2026-candidates.md
+
+Agent (Stage 02 — verify):
+  - Reads the candidate doc(s)
+  - Extracts: $315.04, vigente desde 1 de enero de 2026
+  - Writes stages/02-verify/output/salario-minimo-2026-answer.md
+
+Agent (delivers):
+  El salario mínimo general diario para 2026 es de $315.04 por jornada diaria,
+  vigente desde el 1 de enero de 2026.
+  [Acuerdo por el que se establecen los salarios mínimos 2026] (DOF, 2025-12-09, MAT)
+  — 2025/12/09122025/MAT/006_DOF_20251209_MAT_5775533.md — lines 42–48
+```
+
+## Folder structure
+
+```
+dof-icm/
+  CLAUDE.md                     # Layer 0: map, routing, model config
+  CONTEXT.md                    # Layer 1: task routing
+  corpus/                       # The DOF corpus (2024–2026)
+    2024/01/02012024/MAT/...    # One .md per legal doc
+    index/                      # Navigation maps (by-year, by-section, recent)
+  stages/
+    01-locate/                  # Find candidate docs
+      CONTEXT.md
+      references/
+        citation-format.md
+      output/                   # [slug]-candidates.md
+    02-verify/                  # Extract + verify the answer
+      CONTEXT.md
+      references/
+        answer-quality.md
+      output/                   # [slug]-answer.md
+  skills/
+    dof-retrieval/
+      SKILL.md                  # Retrieval skill (when to use + how)
+      rules/
+        navigate-year-section.md
+        grep-patterns.md
+        multi-doc-questions.md
+        temporal-questions.md
+  setup/
+    questionnaire.md            # One-time onboarding
+  eval/
+    questions.jsonl             # Year-scoped eval set
+    results/                    # Run outputs
+```
+
+## The 5-layer routing
+
+The agent reads *down* the layers and stops when it has enough context:
+
+| Layer | File | Token cost | When loaded |
+|-------|------|------------|-------------|
+| 0 | `CLAUDE.md` | ~800 | Always (auto-loaded by harness) |
+| 1 | `CONTEXT.md` | ~300 | On entry (task routing) |
+| 2 | `stages/*/CONTEXT.md` | ~200–500 | Per-task (which stage) |
+| 3 | `references/`, `skills/` | varies | Selectively (when needed) |
+| 4 | `corpus/`, `output/` | varies | Per-run (the actual work) |
+
+**No agent reads everything.** A locate agent reads Layers 0–2 + the skill. A verify agent reads Layers 0–2 + the candidates + the specific doc files.
+
+## Eval
+
+A year-scoped eval set (`eval/questions.jsonl`) constrained to 2024–2026 gold docs, using the 7-category taxonomy from the upstream `dof-rag` v4 set. Run results land in `eval/results/`.
+
+## License
+
+DOF content is public domain (Mexican government). Workspace code is MIT.
