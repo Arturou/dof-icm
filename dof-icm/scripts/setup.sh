@@ -3,7 +3,7 @@
 # Runs from the parent dof-rag/ checkout (needs uv, soffice, pandoc).
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ICM="$REPO_ROOT/dof-icm"
 CORPUS="$ICM/corpus"
 START="${1:-01/01/2024}"
