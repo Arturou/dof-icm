@@ -64,6 +64,18 @@ Read the candidate docs, extract the answer, and verify it against the question.
 
 **Before writing output:** ask yourself — "Can a reader verify this answer by following the citations?" If not, fix the citations. "Am I answering the question that was asked, or a nearby question?" If not, re-read the question.
 
+## Negative-premise protocol (questions that assert a premise)
+
+Some questions assert a premise ("why did X happen", "when was X abrogated", "what did X establish") that may be **false** or only partially true. Handle them in this order, then STOP:
+
+1. **Extract the premise.** What fact does the question assume? (e.g. "the UMA began applying Jan 1" / "the Water Law was fully abrogated").
+2. **Verify the premise against the docs you have.** One targeted read or grep is enough. Do NOT keep searching for more confirmation once the doc answers it.
+3. **Answer with correction.** If the premise is true → answer normally. If false or partial → state the correction explicitly FIRST, cite the contradicting doc (relpath + lines), then answer the corrected question.
+4. **Record premise status** in the answer file:
+   `premise_status: true | false | partial`
+   Add one audit line: `- [ ] Premise verified against a cited doc: YES/NO — [note]`
+5. **STOP after step 3.** Do not grep the same terms again ("abroga"/"deroga"/"vigente") to double-check — the cited doc is the source of truth.
+
 ## Audit
 
 - [ ] Answer directly addresses the question (not a nearby question)

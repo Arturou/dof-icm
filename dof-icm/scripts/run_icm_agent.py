@@ -41,7 +41,19 @@ STAGE2 = WORKSPACE / "stages/02-verify/CONTEXT.md"
 STAGE2_REF = WORKSPACE / "stages/02-verify/references/answer-quality.md"
 SKILL = WORKSPACE / "skills/dof-retrieval/SKILL.md"
 
-MAX_TURNS = 8
+# Category-aware turn budget: easy/medium stay fast; the hard tier
+# (multi-doc, negative-premise) legitimately needs more reads.
+MAX_TURNS_BY_CATEGORY = {
+    "multi_document": 14,
+    "negative_false_premise": 12,
+    "temporal_transitorio": 12,
+    "cross_reference": 10,
+}
+DEFAULT_MAX_TURNS = 8
+
+
+def max_turns_for(qid: str, category: str) -> int:
+    return MAX_TURNS_BY_CATEGORY.get(category, DEFAULT_MAX_TURNS)
 
 
 def load_text(path: Path, limit: int = 12_000) -> str:
@@ -208,13 +220,20 @@ def call_tool(name: str, args: dict) -> dict:
             return {"ok": False, "error": f"not found: {rel}"}
         text = p.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
-        # Default: return the WHOLE file (most docs are 100-600 lines) so the
-        # agent doesn't burn turns re-reading chunks.
         start = int(args.get("start_line", 1)) - 1
         end = int(args.get("end_line", len(lines)))
         if end > len(lines):
             end = len(lines)
         chunk = "\n".join(lines[start:end])
+        # Long docs (>800 lines): return everything in ONE response so the
+        # agent never needs to re-read in chunks. 800 lines is ~well under
+        # the output window; the tool result is capped at 30k chars.
+        if len(lines) > 800 and not args.get("start_line"):
+            chunk = "\n".join(lines)
+            return {
+                "ok": True,
+                "content": f"# {rel} (FULL DOCUMENT, {len(lines)} lines)\n" + chunk[:30000],
+            }
         return {
             "ok": True,
             "content": f"# {rel} (lines {start+1}-{end}, total {len(lines)})\n" + chunk,
@@ -266,13 +285,14 @@ Question: {question}
 """
 
 
-def run_question(client, model: str, question: str, qid: str = "") -> dict:
+def run_question(client, model: str, question: str, qid: str = "", category: str = "") -> dict:
     messages = [{"role": "system", "content": build_system_prompt(question)}]
     trace: list[dict] = []
     usage = {"input_tokens": 0, "output_tokens": 0}
+    cap = max_turns_for(qid, category)
 
-    for _turn in range(MAX_TURNS):
-        print(f"    [turn {_turn}] calling API...", flush=True)
+    for _turn in range(cap):
+        print(f"    [turn {_turn}/{cap}] calling API...", flush=True)
         resp = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -366,7 +386,7 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     for q in questions:
         print(f"==> {q['id']}: {q['question'][:80]}", flush=True)
-        r = run_question(client, args.model, q["question"], q["id"])
+        r = run_question(client, args.model, q["question"], q["id"], q.get("category", ""))
         results.append(r)
         with open(out_path, "a") as f:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")

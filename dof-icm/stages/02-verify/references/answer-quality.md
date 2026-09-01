@@ -32,3 +32,17 @@
 - Cite the search you tried (commands + hit counts).
 - Suggest where the answer *might* be (e.g., "posiblemente en un documento anterior a 2024, no incluido en este corpus").
 - Do **not** guess or fabricate.
+
+## Negative-premise questions
+
+When the question asserts a premise (e.g. "¿Por qué X?", "¿Cuándo se abrogó Y?", "¿Qué estableció Z?"), the premise may be false. A good answer:
+
+1. **States the premise explicitly** ("La pregunta asume que...").
+2. **Verifies it once** — one read/grep of the relevant doc.
+3. **Corrects if needed** — "La premisa es falsa: la Ley no se abrogó por completo; el decreto derogó solo los artículos 1–4 (líneas 20–25)."
+4. **Answers the corrected question**, then stops.
+
+Anti-patterns (observed in eval):
+- ❌ Grepping the same term repeatedly ("abroga", then "deroga", then "vigente") to re-confirm — one cited doc is enough.
+- ❌ Answering as if the premise were true when the docs contradict it.
+- ❌ Burning the turn budget on verification instead of writing the answer.
