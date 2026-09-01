@@ -41,7 +41,7 @@ STAGE2 = WORKSPACE / "stages/02-verify/CONTEXT.md"
 STAGE2_REF = WORKSPACE / "stages/02-verify/references/answer-quality.md"
 SKILL = WORKSPACE / "skills/dof-retrieval/SKILL.md"
 
-MAX_TURNS = 6
+MAX_TURNS = 8
 
 
 def load_text(path: Path, limit: int = 12_000) -> str:
@@ -253,13 +253,14 @@ cite the document relpath and line range.
    most questions resolve in ONE search_titles call. Use grep_corpus only for
    body-only terms, always with year= (and month= when you know it from the
    by-year index).
-2. Do NOT call list_year "for context" — read it once only if you need month
-   counts, then move on. Do not call list_section.
+2. If a search_titles call returns ZERO results, do NOT retry it with
+   different patterns — switch immediately to grep_corpus (year=, month= if
+   known). Do not call list_year or list_section.
 3. Do NOT re-verify figures by grepping them ("315.04", "440.87", etc.) — the
    read_file output you already have is the source of truth. One read of the
    primary doc is enough; a second read is only for a genuinely missing detail.
 4. Skip *_AVISO_* files unless the question is about a notice/bid/edict.
-5. Answer within 6 model turns total (locate ~2, verify ~1, answer ~1).
+5. Answer within 8 model turns total (locate ~3, verify ~2, answer ~1).
 
 Question: {question}
 """
