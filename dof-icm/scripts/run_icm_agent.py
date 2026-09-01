@@ -212,6 +212,7 @@ def run_question(client, model: str, question: str, qid: str = "") -> dict:
             messages=messages,
             tools=tool_schemas(),
             tool_choice="auto",
+            reasoning_effort="minimal",
             timeout=120,
         )
         msg = resp.choices[0].message
