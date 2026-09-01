@@ -82,6 +82,21 @@ def convert_single_doc(doc_path: Path, output_md_path: Path, worker_id: int = 0)
         result["status"] = "skipped"
         return result
 
+    # Guard: reject files that are not actually Word documents. The DOF
+    # downloader sometimes saves HTML error/redirect pages with a .doc
+    # extension; LibreOffice would burn MAX_RETRIES timeouts on them.
+    try:
+        with open(doc_path, "rb") as _f:
+            _head = _f.read(8)
+        if _head.startswith(b"<!DOCTYPE") or _head.startswith(b"<html"):
+            result["status"] = "not_a_doc"
+            result["error"] = "file is HTML, not a Word document"
+            return result
+    except OSError as _e:
+        result["status"] = "read_failed"
+        result["error"] = str(_e)
+        return result
+
     output_md_path.parent.mkdir(parents=True, exist_ok=True)
 
     for attempt in range(1, MAX_RETRIES + 1):
