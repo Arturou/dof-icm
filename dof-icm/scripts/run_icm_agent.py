@@ -41,7 +41,7 @@ STAGE2 = WORKSPACE / "stages/02-verify/CONTEXT.md"
 STAGE2_REF = WORKSPACE / "stages/02-verify/references/answer-quality.md"
 SKILL = WORKSPACE / "skills/dof-retrieval/SKILL.md"
 
-MAX_TURNS = 12
+MAX_TURNS = 6
 
 
 def load_text(path: Path, limit: int = 12_000) -> str:
@@ -56,7 +56,7 @@ def tool_schemas() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "list_year",
-                "description": "List the DOF index for a publication year (corpus/index/by-year-YYYY.md).",
+                "description": "List the DOF index for a publication year: total docs, per-month counts, and a few sample titles (corpus/index/by-year-YYYY.md).",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -83,17 +83,34 @@ def tool_schemas() -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "search_titles",
+                "description": "FAST: grep the full title index of a year for a term. Returns all matching relpaths with titles. Use this FIRST to locate documents by title/institution keyword. Then read_file the best match.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {"type": "string", "description": "grep regex, case-insensitive, e.g. 'salarios m.nimos' or 'CONASAMI' or 'tipo de cambio'"},
+                        "year": {"type": "string", "description": "Optional: restrict to a 4-digit year, e.g. 2025"},
+                        "max_results": {"type": "integer", "description": "Max matches to return (default 10)"}
+                    },
+                    "required": ["pattern"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "grep_corpus",
-                "description": "Grep the markdown corpus (or a subfolder) for a case-insensitive term. Returns matching files with hit counts and first-match snippets. Use year/section filters to narrow scope.",
+                "description": "Grep the markdown corpus CONTENT for a term. SLOWER than search_titles — only use when the title index has no match and you must search document bodies. ALWAYS scope by year (and month if known). Returns matching files with hit counts and first-match snippets.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "pattern": {"type": "string", "description": "grep regex, e.g. 'salario m.nimo'"},
-                        "year": {"type": "string", "description": "Optional: 4-digit year subfolder, e.g. 2025"},
+                        "year": {"type": "string", "description": "Required: 4-digit year subfolder, e.g. 2025"},
+                        "month": {"type": "string", "description": "Optional: 2-digit month subfolder, e.g. 12"},
                         "section": {"type": "string", "description": "Optional: MAT or VES"},
                         "max_results": {"type": "integer", "description": "Max files to return (default 10)"}
                     },
-                    "required": ["pattern"],
+                    "required": ["pattern", "year"],
                 },
             },
         },
@@ -123,10 +140,41 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "list_section":
         p = INDEX / f"by-section-{args['section']}.md"
         return {"ok": True, "content": load_text(p)}
+    if name == "search_titles":
+        year = args.get("year")
+        if year:
+            paths = [INDEX / f"titles-{year}.md"]
+        else:
+            paths = sorted(INDEX.glob("titles-*.md"))
+        pattern = args["pattern"]
+        max_res = int(args.get("max_results", 10))
+        out = []
+        for p in paths:
+            if not p.exists():
+                continue
+            try:
+                proc = subprocess.run(
+                    ["grep", "-im1", "-E", pattern, str(p)],
+                    capture_output=True, text=True, timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                continue
+            for line in proc.stdout.splitlines():
+                if not line.strip():
+                    continue
+                rel, _, title = line.partition("\t")
+                out.append({"relpath": rel, "title": title.strip()[:120]})
+                if len(out) >= max_res:
+                    break
+            if len(out) >= max_res:
+                break
+        return {"ok": True, "content": json.dumps(out, ensure_ascii=False)}
     if name == "grep_corpus":
         base = CORPUS
         if args.get("year"):
             base = base / str(args["year"])
+        if args.get("month"):
+            base = base / args["month"]
         if args.get("section"):
             base = base / args["section"]
         if not base.exists():
@@ -160,8 +208,12 @@ def call_tool(name: str, args: dict) -> dict:
             return {"ok": False, "error": f"not found: {rel}"}
         text = p.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
+        # Default: return the WHOLE file (most docs are 100-600 lines) so the
+        # agent doesn't burn turns re-reading chunks.
         start = int(args.get("start_line", 1)) - 1
-        end = int(args.get("end_line", start + 200))
+        end = int(args.get("end_line", len(lines)))
+        if end > len(lines):
+            end = len(lines)
         chunk = "\n".join(lines[start:end])
         return {
             "ok": True,
@@ -195,6 +247,19 @@ Answer the following question about Mexican federal law using the DOF corpus
 (2024-2026). Run stage 01 (locate candidate docs using the tools), then stage
 02 (read the candidates and produce a cited answer). Every factual claim must
 cite the document relpath and line range.
+
+=== EFFICIENCY RULES (follow strictly — you have a small tool budget) ===
+1. Prefer search_titles over grep_corpus: titles carry institution + topic, so
+   most questions resolve in ONE search_titles call. Use grep_corpus only for
+   body-only terms, always with year= (and month= when you know it from the
+   by-year index).
+2. Do NOT call list_year "for context" — read it once only if you need month
+   counts, then move on. Do not call list_section.
+3. Do NOT re-verify figures by grepping them ("315.04", "440.87", etc.) — the
+   read_file output you already have is the source of truth. One read of the
+   primary doc is enough; a second read is only for a genuinely missing detail.
+4. Skip *_AVISO_* files unless the question is about a notice/bid/edict.
+5. Answer within 6 model turns total (locate ~2, verify ~1, answer ~1).
 
 Question: {question}
 """

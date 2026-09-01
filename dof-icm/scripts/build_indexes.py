@@ -75,9 +75,13 @@ def main() -> None:
         out = index_dir / f"by-year-{year}.md"
         lines = [f"# DOF documents published in {year}", ""]
         total = 0
+        # Per-month counts (fast scoping without reading 20k lines)
+        month_counts: dict[int, int] = defaultdict(int)
         for section in sorted(years[year]):
             docs = sorted(years[year][section])
             total += len(docs)
+            for date, _p in docs:
+                month_counts[date.month] += 1
             lines.append(f"## Section {section} — {len(docs)} documents")
             lines.append("")
             # Sample: first 5 + last 5 titles
@@ -94,11 +98,31 @@ def main() -> None:
                     + (f" — {title}" if title else "")
                 )
             lines.append("")
-        # Doc counts by month
-        lines.insert(1, f"**Total: {total} documents**")
-        lines.insert(2, "")
+        # Doc counts by month (insert after header line + blank)
+        month_lines = ["", "## Documents per month", ""]
+        month_lines.append("| Month | Documents |")
+        month_lines.append("|-------|-----------|")
+        for m in range(1, 13):
+            if month_counts.get(m):
+                month_lines.append(f"| {m:02d} | {month_counts[m]} |")
+        month_lines.append("")
+        lines = lines[:1] + [f"**Total: {total} documents**"] + month_lines + lines[1:]
         out.write_text("\n".join(lines) + "\n")
         print(f"wrote {out} ({total} docs)")
+
+        # Full title index: one line per doc — relpath<TAB>title.
+        # Lets the agent locate docs by title with a single fast grep
+        # instead of scanning the whole corpus.
+        title_out = index_dir / f"titles-{year}.md"
+        tlines: list[str] = []
+        for section in sorted(years[year]):
+            for date, path in sorted(years[year][section]):
+                title = extract_title(path.read_text(errors="replace")[:4000])
+                tlines.append(
+                    f"{path.relative_to(corpus).as_posix()}\t{title or '(sin título)'}"
+                )
+        title_out.write_text("\n".join(tlines) + "\n")
+        print(f"wrote {title_out} ({len(tlines)} titles)")
 
     for section in sorted(sections):
         out = index_dir / f"by-section-{section}.md"
