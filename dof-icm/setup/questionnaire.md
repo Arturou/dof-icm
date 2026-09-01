@@ -43,9 +43,10 @@ One-time onboarding. Answer these to configure the workspace. (All optional — 
 The workspace prescribes this model, but your harness must be configured to use it:
 
 ```
-endpoint: http://100.99.75.13:1234/v1
-model: qwen3.8-27b
-reasoning_effort: low
+provider: deepseek        # OpenAI-compatible API
+endpoint: https://api.deepseek.com/v1
+model: deepseek-v4-flash
+api_key: $DEEPSEEK_API_KEY
 ```
 
 - Is this correct for your setup?

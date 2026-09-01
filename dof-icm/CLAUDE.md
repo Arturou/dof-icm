@@ -4,9 +4,10 @@ Portable, file-based Q&A over the Mexican **Diario Oficial de la Federación** (
 
 ## Model
 
-- **Endpoint:** `http://100.99.75.13:1234/v1` (LM Studio, OpenAI-compatible)
-- **Model:** `qwen3.8-27b`
-- **Reasoning effort:** `low`
+- **Provider:** DeepSeek API (OpenAI-compatible)
+- **Endpoint:** `https://api.deepseek.com/v1`
+- **Model:** `deepseek-v4-flash`
+- **API key:** `DEEPSEEK_API_KEY` environment variable (set by the operator; never commit it)
 - The agent (any harness) must be configured to use this model. The workspace itself is model-agnostic — it only prescribes the context the agent should read.
 
 ## Folder map

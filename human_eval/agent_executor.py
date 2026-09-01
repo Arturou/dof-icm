@@ -63,10 +63,10 @@ class AgentExecutorConfig:
     def from_env(cls, repo_root: str | Path) -> "AgentExecutorConfig":
         root = Path(repo_root).resolve()
         provider = os.environ.get("DOF_AGENT_PROVIDER", "openai-responses")
-        if provider not in {"openai-responses", "kimi-code", "llama-server"}:
+        if provider not in {"openai-responses", "kimi-code", "llama-server", "deepseek"}:
             raise ValueError(
                 "DOF_AGENT_PROVIDER must be openai-responses, kimi-code, "
-                "or llama-server"
+                "llama-server, or deepseek"
             )
         model = os.environ.get("DOF_AGENT_MODEL", os.environ.get("OPENAI_MODEL", ""))
         if not model:
@@ -275,6 +275,19 @@ class AgentRunExecutor:
                 model=self.config.model,
                 api_key=api_key,
                 base_url=self.config.base_url or "https://api.kimi.com/coding/v1",
+            )
+        if self.config.provider == "deepseek":
+            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+            if not api_key:
+                raise PublicExecutionError(
+                    "provider_unavailable",
+                    "El proveedor del agente no está configurado.",
+                )
+            return OpenAIChatCompletionsBackend(
+                model=self.config.model,
+                api_key=api_key,
+                base_url=self.config.base_url or "https://api.deepseek.com/v1",
+                reasoning_effort=self.config.reasoning_effort,
             )
         return OpenAIResponsesBackend(
             model=self.config.model,

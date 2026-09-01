@@ -20,7 +20,7 @@ Built on the [Interpretable Context Methodology (ICM)](https://github.com/RinDig
 ## Requirements
 
 - **An agent harness** that can read markdown files and execute shell commands (grep, etc.)
-- **A model** (recommended: `qwen3.8-27b` at `http://100.99.75.13:1234/v1`, `reasoning_effort=low`)
+- **A model** (recommended: DeepSeek `deepseek-v4-flash` via `https://api.deepseek.com/v1`, key in `DEEPSEEK_API_KEY`)
 - **The corpus** (`corpus/` folder) — either committed to the repo or downloaded via the setup script
 
 ## Quickstart
@@ -41,9 +41,10 @@ rm -rf dof_word/  # free ~20–40 GB after verified conversion
 Point your agent at the `dof-icm/` folder and use this model config:
 
 ```
-endpoint: http://100.99.75.13:1234/v1
-model: qwen3.8-27b
-reasoning_effort: low
+provider: deepseek        # OpenAI-compatible API
+endpoint: https://api.deepseek.com/v1
+model: deepseek-v4-flash
+api_key: $DEEPSEEK_API_KEY
 ```
 
 ### 3. Ask a question
