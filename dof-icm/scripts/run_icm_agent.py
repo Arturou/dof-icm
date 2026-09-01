@@ -206,13 +206,20 @@ def run_question(client, model: str, question: str, qid: str = "") -> dict:
     usage = {"input_tokens": 0, "output_tokens": 0}
 
     for _turn in range(MAX_TURNS):
+        print(f"    [turn {_turn}] calling API...", flush=True)
         resp = client.chat.completions.create(
             model=model,
             messages=messages,
             tools=tool_schemas(),
             tool_choice="auto",
+            timeout=120,
         )
         msg = resp.choices[0].message
+        print(
+            f"    [turn {_turn}] finish={resp.choices[0].finish_reason} "
+            f"calls={len(msg.tool_calls or [])} content_len={len(msg.content or '')}",
+            flush=True,
+        )
         if resp.usage:
             usage["input_tokens"] += resp.usage.prompt_tokens or 0
             usage["output_tokens"] += resp.usage.completion_tokens or 0
