@@ -14,15 +14,14 @@ Simplified version - Only downloads WORD files
 
 """
 
+import logging
 import re
 import ssl
 import sys
 import time
-import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 import requests
 import typer
@@ -30,11 +29,13 @@ import urllib3
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 
+from word_validation import is_valid_word_file, is_valid_word_payload
+
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Constants
-MIN_FILE_SIZE = 1024  # Minimum file size in bytes for validation
+ERROR_COUNT = 0
 
 
 class TLSAdapter(HTTPAdapter):
@@ -70,7 +71,7 @@ def setup_session() -> requests.Session:
     return session
 
 
-def extract_word_links(html_content: str, base_url: str = 'https://www.dof.gob.mx') -> List[tuple[str, str]]:
+def extract_word_links(html_content: str, base_url: str = 'https://www.dof.gob.mx') -> list[tuple[str, str]]:
     """
     Extracts WORD file links from HTML content
     
@@ -98,7 +99,7 @@ def extract_word_links(html_content: str, base_url: str = 'https://www.dof.gob.m
     return word_links
 
 
-def extract_notice_links(html_content: str) -> List[tuple[str, str]]:
+def extract_notice_links(html_content: str) -> list[tuple[str, str]]:
     """
     Extracts notice links from SIDOF HTML content for all AVISOS subsections
     Detects edition (MAT/VES) based on tab-pane container
@@ -152,6 +153,49 @@ def extract_notice_links(html_content: str) -> List[tuple[str, str]]:
     return notice_links
 
 
+def is_valid_dof_listing(
+    html_content: str, date_str: str, edition: str
+) -> bool:
+    """Recognize a populated listing or an explicit validated empty date."""
+    soup = BeautifulSoup(html_content, "html.parser")
+    title = soup.title.get_text(" ", strip=True).casefold() if soup.title else ""
+    if "diario oficial de la federación" not in title:
+        return False
+    if soup.find(id="cuerpo_principal") is None:
+        return False
+
+    text = " ".join(soup.stripped_strings).casefold()
+    edition_name = {"MAT": "matutina", "VES": "vespertina"}.get(edition)
+    if not edition_name:
+        return False
+    expected_header = f"fecha: {date_str} - edición {edition_name}".casefold()
+    return (
+        expected_header in text
+        or "no hay datos para la fecha seleccionada" in text
+    )
+
+
+def is_valid_sidof_listing(
+    html_content: str, day: str, month: str, year: str
+) -> bool:
+    """Require the dated SIDOF publication shell before accepting no notices.
+
+    The listing page is edition-agnostic (edition filtering happens during
+    notice extraction). Either notices tab may be absent on normal days, so
+    the presence of either one (plus title and date) proves the real page.
+    """
+    soup = BeautifulSoup(html_content, "html.parser")
+    title = soup.title.get_text(" ", strip=True).casefold() if soup.title else ""
+    if "diario oficial de la federación" not in title:
+        return False
+    if f"{day}-{month}-{year}" not in html_content:
+        return False
+    return (
+        soup.find(id="resp-tab2") is not None
+        or soup.find(id="resp-tab3") is not None
+    )
+
+
 def _download_file(session: requests.Session, url: str, output_path: Path, file_type: str = "file") -> bool:
     """
     Internal function to download a file from a URL
@@ -165,30 +209,53 @@ def _download_file(session: requests.Session, url: str, output_path: Path, file_
     Returns:
         True if download was successful, False otherwise
     """
+    global ERROR_COUNT
     try:
         logging.info(f"Downloading {file_type}: {url}")
         
         response = session.get(url, timeout=30)
         response.raise_for_status()
         
+        if not is_valid_word_payload(response.content):
+            if _is_permanent_missing(response):
+                # The source states the file does not exist; retrying on
+                # every daily run would fail forever. Record a tombstone
+                # next to the target and skip it from now on (delete the
+                # marker to force a retry). Not counted as an error.
+                marker = output_path.with_suffix(output_path.suffix + ".missing")
+                marker.write_text(response.url + "\n", encoding="utf-8")
+                logging.warning(
+                    f"Source reports the file does not exist; "
+                    f"marking permanently missing: {url}"
+                )
+                return False
+            logging.error(f"Invalid WORD payload returned by {url}")
+            if output_path.exists() and not is_valid_word_file(output_path):
+                output_path.unlink()
+            ERROR_COUNT += 1
+            return False
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(output_path, 'wb') as f:
+        temporary = output_path.with_suffix(output_path.suffix + ".part")
+        with open(temporary, 'wb') as f:
             f.write(response.content)
-        
-        if output_path.exists() and output_path.stat().st_size >= MIN_FILE_SIZE:
+        temporary.replace(output_path)
+
+        if is_valid_word_file(output_path):
             logging.info(f"Downloaded successfully: {output_path}")
             return True
         else:
             logging.warning(f"Invalid file (missing or too small), deleting: {output_path}")
             if output_path.exists():
                 output_path.unlink()
+            ERROR_COUNT += 1
             return False
             
     except Exception as e:
         logging.error(f"Error downloading {url}: {e}")
         if output_path.exists():
             output_path.unlink()
+        ERROR_COUNT += 1
         return False
 
 
@@ -205,6 +272,29 @@ def download_notice_file(session: requests.Session, note_id: str, output_path: P
     """
     url = f"https://sidof.segob.gob.mx/notas/getDoc/{note_id}"
     return _download_file(session, url, output_path, file_type="notice")
+
+
+def has_valid_download(date_dir: Path, note_id: str) -> bool:
+    """Return whether this note exists under any page-order sequence number."""
+    return any(is_valid_word_file(path) for path in date_dir.glob(f"*_{note_id}.doc"))
+
+
+def _is_permanent_missing(response: requests.Response) -> bool:
+    """Whether the source server states that the file does not exist.
+
+    SIDOF redirects such notes to an "El archivo no existe" HTML page; that
+    is a permanent source-side absence, not a transient download failure.
+    """
+    if "archivo no existe" in unquote(response.url).lower():
+        return True
+    if "html" not in response.headers.get("Content-Type", "").lower():
+        return False
+    return "el archivo no existe" in response.text.lower()
+
+
+def has_missing_marker(date_dir: Path, note_id: str) -> bool:
+    """Whether a previous run recorded this note as permanently unavailable."""
+    return any(date_dir.glob(f"*_{note_id}.doc.missing"))
 
 
 def _create_edition_dir(output_dir: Path, day: str, month: str, year: str, edition: str) -> Path:
@@ -230,12 +320,21 @@ def process_sidof_notices(session: requests.Session, day: str, month: str, year:
     Returns:
         Number of notice files downloaded successfully
     """
+    global ERROR_COUNT
     sidof_url = f"https://sidof.segob.gob.mx/welcome/{day}-{month}-{year}"
     
     try:
         logging.info(f"Processing SIDOF page: {sidof_url}")
         response = session.get(sidof_url, timeout=30)
         response.raise_for_status()
+
+        if not is_valid_sidof_listing(response.text, day, month, year):
+            ERROR_COUNT += 1
+            logging.error(
+                f"SIDOF returned an unrecognized listing for "
+                f"{day}/{month}/{year}; refusing to validate an empty date"
+            )
+            return 0
         
         notice_links = extract_notice_links(response.text)
         
@@ -259,8 +358,12 @@ def process_sidof_notices(session: requests.Session, day: str, month: str, year:
             filename = f"{str(index+1).zfill(3)}_AVISO_{year}{month}{day}_{edition}_{note_id}.doc"
             output_path = date_dir / filename
             
-            if output_path.exists() and output_path.stat().st_size >= MIN_FILE_SIZE:
-                logging.warning(f"File already exists: {output_path}")
+            if has_valid_download(date_dir, note_id):
+                logging.info(f"Notice already downloaded: {note_id}")
+                continue
+            
+            if has_missing_marker(date_dir, note_id):
+                logging.info(f"Notice permanently missing, skipping: {note_id}")
                 continue
             
             if download_notice_file(session, note_id, output_path):
@@ -271,6 +374,7 @@ def process_sidof_notices(session: requests.Session, day: str, month: str, year:
         return downloaded_count
         
     except Exception as e:
+        ERROR_COUNT += 1
         logging.error(f"Error processing SIDOF page {sidof_url}: {e}")
         return 0
 
@@ -289,6 +393,7 @@ def process_dof_page(session: requests.Session, date_str: str, edition: str, out
     Returns:
         Number of files downloaded successfully
     """
+    global ERROR_COUNT
     day, month, year = date_str.split('/')
     
     dof_url = f"https://www.dof.gob.mx/index.php?year={year}&month={month}&day={day}&edicion={edition}"
@@ -298,31 +403,45 @@ def process_dof_page(session: requests.Session, date_str: str, edition: str, out
         response = session.get(dof_url, timeout=30)
         response.raise_for_status()
         
-        word_links = extract_word_links(response.text)
-        
-        if not word_links:
-            logging.info(f"No WORD files found for {date_str} - {edition}")
-            return 0
-        
-        logging.info(f"Found {len(word_links)} WORD files")
-        
-        date_dir = _create_edition_dir(output_dir, day, month, year, edition)
-        
+        if is_valid_dof_listing(response.text, date_str, edition):
+            word_links = extract_word_links(response.text)
+        else:
+            ERROR_COUNT += 1
+            logging.error(
+                f"DOF returned an unrecognized listing for {date_str} - {edition}; "
+                "refusing to validate an empty date"
+            )
+            word_links = []
         downloaded_count = 0
-        
-        for index, (word_url, codnota) in enumerate(word_links):
-            filename = f"{str(index+1).zfill(3)}_DOF_{year}{month}{day}_{edition}_{codnota}.doc"
-            output_path = date_dir / filename
-            
-            if output_path.exists() and output_path.stat().st_size >= MIN_FILE_SIZE:
-                logging.warning(f"File already exists: {output_path}")
-                continue
-            
-            if download_word_file(session, word_url, output_path):
-                downloaded_count += 1
-            
-            time.sleep(sleep_delay)
-        
+
+        if not word_links:
+            # No Word documents on the main page does not imply the edition
+            # is empty: SIDOF notices may still exist for this date.
+            logging.info(
+                f"No WORD files found for {date_str} - {edition}; "
+                "still checking SIDOF notices")
+        else:
+            logging.info(f"Found {len(word_links)} WORD files")
+
+            date_dir = _create_edition_dir(output_dir, day, month, year, edition)
+
+            for index, (word_url, codnota) in enumerate(word_links):
+                filename = f"{str(index+1).zfill(3)}_DOF_{year}{month}{day}_{edition}_{codnota}.doc"
+                output_path = date_dir / filename
+
+                if has_valid_download(date_dir, codnota):
+                    logging.info(f"WORD note already downloaded: {codnota}")
+                    continue
+
+                if has_missing_marker(date_dir, codnota):
+                    logging.info(f"WORD note permanently missing, skipping: {codnota}")
+                    continue
+
+                if download_word_file(session, word_url, output_path):
+                    downloaded_count += 1
+
+                time.sleep(sleep_delay)
+
         logging.info(f"Now processing SIDOF notices for {date_str} - {edition}")
         notices_downloaded = process_sidof_notices(session, day, month, year, edition, output_dir, sleep_delay, start_index=len(word_links))
         downloaded_count += notices_downloaded
@@ -330,13 +449,14 @@ def process_dof_page(session: requests.Session, date_str: str, edition: str, out
         return downloaded_count
         
     except Exception as e:
+        ERROR_COUNT += 1
         logging.error(f"Error processing page {dof_url}: {e}")
         return 0
 
 
 def main(
     date: str = typer.Argument(..., help="Fecha (DD/MM/YYYY) o fecha de inicio para rango"),
-    end_date: Optional[str] = typer.Argument(None, help="Fecha de fin (DD/MM/YYYY) - opcional para rango de fechas"),
+    end_date: str | None = typer.Argument(None, help="Fecha de fin (DD/MM/YYYY) - opcional para rango de fechas"),
     output_dir: str = typer.Option("./dof_word", help="Directorio de salida"),
     editions: str = typer.Option("both", help="Ediciones a descargar: 'mat', 'ves', o 'both'"),
     log_level: str = typer.Option("INFO", help="Nivel de logging: DEBUG, INFO, WARNING, ERROR"),
@@ -365,6 +485,9 @@ def main(
     python get_word_dof.py 01/01/2023 31/01/2023 --output-dir ./dof --editions both --sleep-delay 1.5
     """
     
+    global ERROR_COUNT
+    ERROR_COUNT = 0
+
     log_levels = {
         'DEBUG': logging.DEBUG,
         'INFO': logging.INFO,
@@ -438,6 +561,9 @@ def main(
     
     logging.info("-" * 60)
     logging.info(f"Download completed. Total files downloaded: {total_downloaded}")
+    if ERROR_COUNT:
+        logging.error(f"Download completed with {ERROR_COUNT} error(s)")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,16 @@ dof_word/
 
 > **NOTA**: El script descarga un archivo .doc por cada documento legal individual (no por edición completa).
 
+### Actualización diaria
+
+El servidor de producción descarga, convierte e indexa automáticamente los
+documentos nuevos, incluyendo FTS5, chunks, embeddings y vec0 — vía `launchd`
+en macOS o un *user timer* de `systemd` en Linux. El pipeline es reanudable y
+se pone al corriente desde la fecha más reciente confirmada antes de cambiar
+a una ventana diaria de siete días. Consulta
+[`docs/daily-updates.md`](docs/daily-updates.md) para instalación, pruebas,
+logs y operación.
+
 ## Extraer markdown
 
 Hay dos métodos de extracción dependiendo del tipo de archivo:

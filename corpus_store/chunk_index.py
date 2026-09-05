@@ -30,14 +30,18 @@ import argparse
 import hashlib
 import json
 import sqlite3
-import sys
 import time
 from pathlib import Path
 
-from rag_poc.chunker import (
-    BOILERPLATE_H, DocPattern, H2_RE, _count_tokens, _inline_image_descriptions,
-    split_text)
 from corpus_store.db import connect
+from rag_poc.chunker import (
+    BOILERPLATE_H,
+    H2_RE,
+    DocPattern,
+    _count_tokens,
+    _inline_image_descriptions,
+    split_text,
+)
 
 CHUNKER_VERSION = "dof-chunker-v1"  # rag_poc.chunker, MAX_TOKENS=800, OVERLAP=50
 
@@ -225,15 +229,38 @@ def reconstruct(recipe: list, c: str) -> str:
     return "".join(parts)
 
 
-def iter_documents(conn: sqlite3.Connection):
+def iter_documents(
+    conn: sqlite3.Connection,
+    after_document_id: int = 0,
+):
     from corpus_store.db import fetch_document_text
     cur = conn.execute(
-        "SELECT document_id, path, markdown FROM documents ORDER BY document_id")
+        "SELECT document_id, path, markdown FROM documents"
+        " WHERE document_id > ? ORDER BY document_id", (after_document_id,))
     for doc_id, path, text in cur:
         if text:
             yield doc_id, path, text
         else:
             yield doc_id, path, fetch_document_text(conn, doc_id)
+
+
+def require_current_chunker_version(chunks: sqlite3.Connection) -> None:
+    """Refuse to append a new chunk format to an existing versioned store."""
+    unexpected = chunks.execute(
+        "SELECT chunker_version FROM chunks WHERE chunker_version < ? LIMIT 1",
+        (CHUNKER_VERSION,),
+    ).fetchone()
+    if unexpected is None:
+        unexpected = chunks.execute(
+            "SELECT chunker_version FROM chunks WHERE chunker_version > ? LIMIT 1",
+            (CHUNKER_VERSION,),
+        ).fetchone()
+    if unexpected:
+        raise RuntimeError(
+            f"chunk store contains incompatible version {unexpected[0]}; "
+            f"expected {CHUNKER_VERSION}. Rebuild the chunk, vector, and vec0 "
+            "stores together instead of mixing versions."
+        )
 
 
 def main() -> None:
@@ -242,24 +269,50 @@ def main() -> None:
     ap.add_argument("--chunks-db", required=True)
     args = ap.parse_args()
 
-    corpus = connect(args.corpus_db)
-    corpus_version = corpus.execute(
-        "SELECT value FROM corpus_meta WHERE key = 'corpus_version'").fetchone()[0]
-
     chunks_path = Path(args.chunks_db)
     fresh = not chunks_path.exists()
     chunks = sqlite3.connect(str(chunks_path))
     if fresh:
         chunks.execute("PRAGMA journal_mode = WAL")
         chunks.execute("PRAGMA synchronous = NORMAL")
-        chunks.executescript(SCHEMA)
-        chunks.commit()
+    chunks.executescript(SCHEMA)
+    chunks.commit()
+
+    try:
+        require_current_chunker_version(chunks)
+    except Exception:
+        chunks.close()
+        raise
+
+    corpus = connect(args.corpus_db)
+    corpus_version = corpus.execute(
+        "SELECT value FROM corpus_meta WHERE key = 'corpus_version'").fetchone()[0]
+
+    # Both stores are append-only and each document is committed only after
+    # all of its chunks have been built. Avoid decompressing the full corpus
+    # on every daily incremental run. A version mismatch is rejected above:
+    # retaining two versions would duplicate retrieval results and vectors.
+    last_document_id = chunks.execute(
+        "SELECT COALESCE(MAX(document_id), 0) FROM chunks"
+    ).fetchone()[0]
 
     t0 = time.time()
     n_docs = n_chunks = n_fallback = n_recipe_bytes = 0
     stats_by_pattern: dict[str, int] = {}
     batch: list[tuple] = []
-    for doc_id, path, raw in iter_documents(corpus):
+
+    def flush_batch() -> None:
+        if not batch:
+            return
+        with chunks:
+            chunks.executemany(
+                "INSERT INTO chunks (document_id, path, chunk_index, pattern,"
+                " start_offset, end_offset, spans_json, token_count,"
+                " heading_path, chunk_hash, chunker_version, corpus_version)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
+        batch.clear()
+
+    for doc_id, path, raw in iter_documents(corpus, last_document_id):
         doc_t0 = time.time()
         done = chunks.execute(
             "SELECT 1 FROM chunks WHERE document_id = ? AND chunker_version = ?"
@@ -322,23 +375,11 @@ def main() -> None:
             print(f"  SLOW doc {doc_id} ({doc_dt:.0f}s, {len(raw) / 2**20:.1f} MiB,"
                   f" {len(doc_chunks)} chunks): {path}", flush=True)
         if len(batch) >= 5000:
-            with chunks:
-                chunks.executemany(
-                    "INSERT INTO chunks (document_id, path, chunk_index, pattern,"
-                    " start_offset, end_offset, spans_json, token_count,"
-                    " heading_path, chunk_hash, chunker_version, corpus_version)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
-            batch.clear()
+            flush_batch()
         if n_docs % 1000 == 0:
             print(f"  {n_docs:,} docs, {n_chunks:,} chunks "
                   f"({time.time() - t0:.0f}s)", flush=True)
-    if batch:
-        with chunks:
-            chunks.executemany(
-                "INSERT INTO chunks (document_id, path, chunk_index, pattern,"
-                " start_offset, end_offset, spans_json, token_count,"
-                " heading_path, chunk_hash, chunker_version, corpus_version)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", batch)
+    flush_batch()
 
     chunks.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     size = chunks_path.stat().st_size
@@ -348,6 +389,8 @@ def main() -> None:
     print(f"recipe bytes total: {n_recipe_bytes / 2**20:.1f} MiB "
           f"({n_recipe_bytes / max(n_chunks, 1):.0f} B/chunk)")
     print(f"chunks db size: {size / 2**20:.1f} MiB in {time.time() - t0:.0f}s")
+    corpus.close()
+    chunks.close()
 
 
 if __name__ == "__main__":

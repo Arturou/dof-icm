@@ -4,8 +4,9 @@ Batched by document_id ranges so we get progress logging and small
 transactions (the embedding run reads this db concurrently in WAL mode).
 
 NOTE: documents_fts is an EXTERNAL CONTENT table, so COUNT(*)/MAX(rowid)
-against it scan the content table (documents), NOT the FTS index. Progress
-is therefore tracked in a sidecar table `_fts_build_meta` instead.
+against it scan the content table (documents), NOT the FTS index. Actual
+progress is read from the FTS5 ``documents_fts_docsize`` shadow table. The
+sidecar `_fts_build_meta` remains as human-readable operational metadata.
 
 Usage:
     uv run python scripts/build_fts_full.py \
@@ -27,12 +28,6 @@ FTS_DDL = """CREATE VIRTUAL TABLE documents_fts USING fts5(
 
 META_DDL = ("CREATE TABLE IF NOT EXISTS _fts_build_meta"
             "(k TEXT PRIMARY KEY, v INTEGER)")
-
-
-def get_meta(conn, key: str) -> int:
-    row = conn.execute(
-        "SELECT v FROM _fts_build_meta WHERE k = ?", (key,)).fetchone()
-    return row[0] if row else 0
 
 
 def set_meta(conn, key: str, value: int) -> None:
@@ -73,20 +68,29 @@ def main() -> None:
 
     total = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     max_id = conn.execute("SELECT MAX(document_id) FROM documents").fetchone()[0]
-    lo = get_meta(conn, "indexed_through")
-    done = get_meta(conn, "indexed_count")
+    done = conn.execute("SELECT COUNT(*) FROM documents_fts_docsize").fetchone()[0]
+    first_missing = conn.execute(
+        "SELECT MIN(d.document_id) FROM documents AS d"
+        " LEFT JOIN documents_fts_docsize AS f ON f.id = d.document_id"
+        " WHERE f.id IS NULL"
+    ).fetchone()[0]
+    lo = first_missing - 1 if first_missing is not None else max_id
+    set_meta(conn, "indexed_through", lo)
+    set_meta(conn, "indexed_count", done)
+    conn.commit()
     print(f"documents: {total:,}  max_id: {max_id:,}  "
           f"already indexed: {done:,} (through id {lo:,})", flush=True)
 
     while lo < max_id:
-        hi = lo + args.batch
+        hi = min(lo + args.batch, max_id)
         t = time.time()
         with conn:
             cur = conn.execute(
                 "INSERT INTO documents_fts(rowid, markdown) "
                 "SELECT document_id, markdown FROM documents "
+                "LEFT JOIN documents_fts_docsize AS f ON f.id = document_id "
                 "WHERE document_id > ? AND document_id <= ? "
-                "AND markdown != ''",
+                "AND f.id IS NULL AND markdown != ''",
                 (lo, hi),
             )
             done += cur.rowcount
@@ -99,10 +103,14 @@ def main() -> None:
               f"batch {time.time() - t:.1f}s)", flush=True)
         lo = hi
 
-    # 32 oversized docs are stored as segments (markdown = ''), reassemble
-    if not get_meta(conn, "segmented_done"):
-        seg_ids = [r[0] for r in conn.execute(
-            "SELECT DISTINCT document_id FROM document_segments")]
+    # Oversized docs are stored as segments (markdown = ''), so reassemble any
+    # missing from the actual FTS shadow table, including documents appended
+    # after the original full build.
+    seg_ids = [r[0] for r in conn.execute(
+        "SELECT DISTINCT s.document_id FROM document_segments AS s"
+        " LEFT JOIN documents_fts_docsize AS f ON f.id = s.document_id"
+        " WHERE f.id IS NULL")]
+    if seg_ids:
         with conn:
             for doc_id in seg_ids:
                 conn.execute(
@@ -114,12 +122,19 @@ def main() -> None:
             set_meta(conn, "segmented_done", 1)
         print(f"indexed {len(seg_ids)} segmented docs", flush=True)
 
+    done = conn.execute("SELECT COUNT(*) FROM documents_fts_docsize").fetchone()[0]
     assert done == total, f"fts count {done} != documents {total}"
     # real index sanity: a MATCH query (COUNT(*) scans the content table!)
     n = conn.execute(
         "SELECT COUNT(*) FROM documents_fts"
         " WHERE documents_fts MATCH 'decreto'").fetchone()[0]
-    assert n > 10_000, f"suspiciously few MATCH results: {n}"
+    if total > 10_000:
+        assert n > 10_000, f"suspiciously few MATCH results: {n}"
+    else:
+        # Small test/incremental corpora are guarded by the exact count
+        # equality above; 'decreto' frequency is unrepresentative there.
+        print(f"small corpus ({total:,} docs): {n:,} 'decreto' matches "
+              "(MATCH threshold only applies above 10,000 docs)", flush=True)
     set_meta(conn, "complete", 1)
     conn.commit()
     print(f"FTS5 build complete: {done:,} docs in "

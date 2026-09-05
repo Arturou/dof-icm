@@ -1,0 +1,11 @@
+[Unit]
+Description=DOF daily corpus update (download, convert, index, embed)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=@DOF_REPO_DIR@/scripts/run_dof_daily_linux.sh
+StandardOutput=append:@DOF_REPO_DIR@/logs/dof-daily.log
+StandardError=append:@DOF_REPO_DIR@/logs/dof-daily.error.log
