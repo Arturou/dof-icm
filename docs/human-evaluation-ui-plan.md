@@ -9,7 +9,7 @@ deben actualizarlo en el mismo cambio de código.
 - El sitio de evaluación vive por completo en `dof-rag`; no depende de
   `dof-rag-website`, Astro, GitHub Pages ni su `base` path.
 - Se usa una aplicación Python de mismo origen con Air, HTML progresivo y una
-  cola local. Air se fija en `0.35.0`, última versión compatible con el Python
+  cola SQLite compartida entre los procesos web y el scheduler. Air se fija en `0.35.0`, última versión compatible con el Python
   3.12 administrado por el proyecto; versiones posteriores requieren Python
   3.13.
 - Sí se guardan las preguntas y las respuestas. Sin ese par no sería posible
@@ -40,7 +40,9 @@ Incluye:
 - snapshot por ejecución de código, corpus, chunks, índice, modelo y
   configuración;
 - historial reciente del mismo evaluador;
-- operación inicial desde la MacBook Pro actual con un solo worker.
+- operación inicial desde el servidor de producción del proyecto con un
+  scheduler único; la MacBook Pro actual queda como entorno de desarrollo y
+  benchmark.
 
 ## Fuera del MVP
 
@@ -52,7 +54,7 @@ Incluye:
   argumentos de herramientas;
 - acceso directo del navegador a SQLite;
 - streaming token a token o de razonamiento privado, cancelación fuerte de una
-  llamada ya enviada al proveedor, múltiples workers o alta disponibilidad;
+  llamada ya enviada al proveedor, varios schedulers o alta disponibilidad;
 - búsqueda web o fuentes distintas del corpus DOF;
 - integrar la UI en Astro durante el MVP. El sitio público podría enlazar a la
   app más adelante, pero no forma parte de su ruta de ejecución.
@@ -63,13 +65,21 @@ Incluye:
 Navegador
   | HTTPS, HTML/forms + Server-Sent Events, cookie de mismo origen
   v
-Aplicación Air en dof-rag
+Aplicación Air en dof-rag (uno o varios procesos web)
   - UI y rutas HTTP en human_eval/app.py
   - sesión, CSRF, validación y límites
-  - EvaluationService + cola local, 1 worker
-  - SQLite de evaluación separado
+  - EvaluationService: admisión transaccional y lecturas, sin ejecutor
   |
   v
+SQLite de evaluación separado (cola persistente compartida)
+  |
+  v
+Scheduler singleton en human_eval/scheduler.py
+  - seguro flock exclusivo junto a la base; el kernel lo libera si muere
+  - al arrancar falla las ejecuciones `started` de la vida anterior
+  - estampa procedencia real y `started` en una sola transacción
+  - pool local acotado por DOF_MODEL_CONCURRENCY; dueño del servidor de
+    embeddings
 AgentRunner + DofToolbox
   - corpus/chunks SQLite abiertos de solo lectura
   - recuperación léxica completa
@@ -84,15 +94,16 @@ API, todavía joven, resulta inestable.
 
 No se usan `BackgroundTasks` para ejecutar al agente: son trabajo en proceso y
 no sustituyen una cola recuperable. `EvaluationService` responde rápido con un
-`run_id`, procesa en su hilo worker y recupera al arrancar las ejecuciones que
-quedaron en cola. Una ejecución que estaba iniciada se marca fallida al
-reiniciar, porque no puede saberse si la llamada externa terminó.
+`run_id` y deja la ejecución al scheduler, un proceso único que protege su
+exclusividad con un seguro `flock` junto a la base. Al arrancar, el scheduler
+marca como interrumpidas las ejecuciones que quedaron iniciadas, porque sólo
+él puede iniciarlas y no puede saberse si la llamada externa terminó.
 
-El MVP admite exactamente un proceso web y un worker. Dentro de ese proceso,
-un bloqueo de ciclo de vida hace atómica la decisión `has_active_run` +
-`create_run` para cada evaluador. Esa garantía no se extiende a varios procesos;
-escalar horizontalmente requerirá mover admisión y cola a una transacción o
-servicio compartido.
+El servicio admite varios procesos web en una misma máquina. La admisión
+(una ejecución activa por evaluador, cuota diaria, capacidad de cola e
+idempotencia con validación de payload) ocurre en una transacción SQLite, así
+que la garantía se extiende a todos los procesos web. La ejecución sigue
+siendo de un solo scheduler; varios nodos requerirían un servicio compartido.
 
 ## Contrato HTTP v1
 
@@ -339,9 +350,10 @@ incompleta; continúa siendo evaluable.
 - Los cuerpos tienen un límite inicial de 16 KiB; contratos validan longitud,
   fechas, enums y campos. El navegador nunca controla rutas de bases o
   parámetros arbitrarios.
-- Límites iniciales: una ejecución activa por evaluador, diez creaciones por
-  hora, cola global de veinte y un worker. Turnos y llamadas a herramientas
-  también están acotados en el backend.
+- Límites iniciales: una ejecución activa por evaluador, una pregunta cada
+  24 h, cola global de veinte y un scheduler con concurrencia de modelo
+  configurable. Turnos y llamadas a herramientas también están acotados en el
+  backend.
 - Las ejecuciones solo son visibles para el hash de evaluador propietario. Los
   endpoints públicos de salud/capacidades no incluyen rutas locales ni secretos.
 - El stream exige la misma sesión y propiedad, lleva `no-store`, se puede
@@ -353,28 +365,38 @@ incompleta; continúa siendo evaluable.
 
 ## Despliegue previsto
 
-El MVP se ejecutará en la MacBook Pro actual, ligado inicialmente a
-`127.0.0.1:8765`. La UI y el backend se publican como una sola app ASGI. Para
-pruebas humanas remotas se colocará delante un túnel o reverse proxy HTTPS que
-termine TLS, limite cuerpos, no almacene en buffer SSE y use un hostname estable;
-todavía debe elegirse el proveedor.
+La MacBook Pro actual es un entorno de desarrollo y benchmark; el despliegue
+operativo corre en la máquina de servidor configurada para el proyecto. La UI
+vive en uno o varios procesos web y la ejecución en un scheduler singleton,
+ambos supervisados como servicios systemd de usuario (`ops/systemd/`), ligados
+inicialmente a `127.0.0.1:8765`. Para pruebas humanas remotas se colocará
+delante un túnel o reverse proxy HTTPS que termine TLS, limite cuerpos, no
+almacene en buffer SSE y use un hostname estable; todavía debe elegirse el
+proveedor.
 
 Configuración mínima, con valores de ejemplo que no deben guardarse en Git:
 
 ```bash
-export DOF_EVALUATOR_TOKENS='token-individual-1,token-individual-2'
+export CLERK_SECRET_KEY='sk_test_...'  # y CLERK_PUBLISHABLE_KEY para airclerk
 export DOF_SESSION_SECRET='valor-aleatorio-de-al-menos-32-caracteres'
 export DOF_ALLOWED_HOSTS='localhost,127.0.0.1,piloto.example'
 export DOF_SECURE_COOKIE='true'
 export DOF_AGENT_PROVIDER='openai-responses'
 export DOF_AGENT_MODEL='modelo-configurado-en-backend'
 export OPENAI_API_KEY='...'
-uv run python -m human_eval.app
+# Dos procesos: el scheduler ejecuta y los procesos web admiten y sirven la UI.
+uv run python -m human_eval.scheduler &
+uv run python -m human_eval.app --workers 2
 ```
 
-La recuperación por defecto es léxica. El worker único evita competir
+En el servidor de producción ambos procesos se instalan como servicios
+systemd de usuario con `scripts/install_human_eval_systemd.sh` (el scheduler
+arranca primero y los procesos web esperan hasta `DOF_SCHEMA_WAIT_SECONDS`, 30
+segundos por defecto, a que termine de preparar el esquema).
+
+La recuperación por defecto es léxica. El scheduler único evita competir
 agresivamente con la indexación en curso. Antes del piloto externo faltan el
-supervisor local, el túnel HTTPS y un procedimiento de backup de
+túnel HTTPS y un procedimiento de backup de
 `var/human_evaluation.sqlite`; el corpus y los índices siguen siendo
 dependencias de solo lectura con su propio ciclo de respaldo.
 
@@ -499,10 +521,11 @@ La procedencia separa `vector_available` (el artefacto existe en disco) de
 - Air sigue evolucionando y la versión compatible con Python 3.12 no es la más
   reciente. Se debe decidir después del piloto si migrar todo el proyecto a
   Python 3.13, mantener 0.35 o sustituir solo la capa web.
-- Exponer la MacBook requiere elegir túnel/proxy, dominio, supervisor y política
-  de actualización antes de invitar evaluadores.
-- La cola y el rate limit son locales y se reinician con el proceso; son
-  suficientes para un piloto de un nodo, no para varios procesos.
+- Exponer el servidor de producción requiere elegir túnel/proxy, dominio y
+  política de actualización antes de invitar evaluadores.
+- La cola y el rate limit viven en el SQLite de evaluación compartido y
+  sobreviven reinicios de cualquier proceso; siguen siendo de un solo nodo,
+  no de varias máquinas.
 - Falta incorporar una verificación mínima del MVP a GitHub Actions; se mantiene
   como trabajo posterior para no mezclar infraestructura de CI con este PR.
 - Deben fijarse presupuesto por modelo, timeout efectivo y respuesta ante cuota

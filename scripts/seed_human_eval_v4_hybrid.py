@@ -10,7 +10,11 @@ Idempotent: each seed run uses
 ``seed:eval-v4`` system user. ``--replace`` deletes existing ``seed:`` runs
 first (the store keeps deletion restricted to seed users).
 
+The seed script executes runs itself, so it takes the same exclusive
+execution lock as the scheduler: stop the scheduler service before seeding.
+
 Usage:
+    systemctl --user stop dof-human-eval-scheduler  # free the execution lock
     set -a; source .env; set +a
     export DOF_AGENT_PROVIDER=kimi-code DOF_AGENT_MODEL=kimi-for-coding \
         DOF_RETRIEVAL_MODE=hybrid
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from human_eval.agent_executor import AgentExecutorConfig, AgentRunExecutor
 from human_eval.contracts import RunRequest
+from human_eval.scheduler import acquire_execution_lock
 from human_eval.service import PublicExecutionError
 from human_eval.store import EvaluationStore
 
@@ -65,13 +71,16 @@ def seed_live_run(
         else:
             # Do not delete a queued/running run owned by another process.
             return "pending"
-    record, created = store.create_run(
-        request, user_id=SEED_USER, provenance=executor.provenance()
-    )
+    # Probe before persisting work so a provenance failure cannot strand a
+    # queued seed run outside this script's execution/publishing flow.
+    provenance = executor.provenance()
+    record, created = store.create_run(request, user_id=SEED_USER)
     if not created:
         return "skipped"
     run_id = record["run_id"]
-    store.append_event(run_id, "started")
+    # The seed script holds the execution lock and acts as the scheduler:
+    # stamp provenance atomically with the started transition.
+    store.start_run(run_id, provenance=provenance)
     try:
         result = executor.execute(
             request,
@@ -106,7 +115,8 @@ def main() -> int:
         "--queries", type=Path, default=Path("eval/dof_queries_v4.jsonl")
     )
     parser.add_argument(
-        "--db", type=Path, default=Path("var/human_evaluation.sqlite")
+        "--db", type=Path, default=None,
+        help="evaluation database (default: DOF_HUMAN_EVAL_DB or var/human_evaluation.sqlite)",
     )
     parser.add_argument(
         "--repo-root",
@@ -134,9 +144,17 @@ def main() -> int:
         if missing:
             parser.error(f"unknown query ids: {sorted(missing)}")
 
-    store = EvaluationStore(args.db)
+    root = args.repo_root.resolve()
+    db_path = args.db or Path(
+        os.environ.get("DOF_HUMAN_EVAL_DB", root / "var/human_evaluation.sqlite")
+    )
+    store = EvaluationStore(db_path)
+    # Only one process may execute runs against a database. Seeding normally
+    # happens with the scheduler service stopped; the lock makes an
+    # accidental overlap fail immediately instead of double-executing.
+    lock_fd = acquire_execution_lock(db_path)
     store.initialize()
-    config = AgentExecutorConfig.from_env(args.repo_root)
+    config = AgentExecutorConfig.from_env(root)
     executor = AgentRunExecutor(config)
     # Pre-warm the embedding server so provenance records vector_used from the
     # first run on (the embedder otherwise starts lazily mid-run).
@@ -164,6 +182,7 @@ def main() -> int:
         )
     finally:
         executor.close()
+        os.close(lock_fd)
     return 1 if counts["failed"] or counts["pending"] else 0
 
 
