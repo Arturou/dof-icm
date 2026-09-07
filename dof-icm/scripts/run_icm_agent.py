@@ -327,7 +327,7 @@ Question: {question}
 """
 
 
-def run_question(client, model: str, question: str, qid: str = "", category: str = "", meta: str = "") -> dict:
+def run_question(client, model: str, question: str, qid: str = "", category: str = "", meta: str = "", *, max_tokens: int | None = None) -> dict:
     messages = [{"role": "system", "content": build_system_prompt(question, meta)}]
     trace: list[dict] = []
     usage = {"input_tokens": 0, "output_tokens": 0}
@@ -335,14 +335,17 @@ def run_question(client, model: str, question: str, qid: str = "", category: str
 
     for _turn in range(cap):
         print(f"    [turn {_turn}/{cap}] calling API...", flush=True)
-        resp = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tool_schemas(),
-            tool_choice="auto",
-            reasoning_effort="minimal",
-            timeout=120,
-        )
+        kwargs: dict = {
+            "model": model,
+            "messages": messages,
+            "tools": tool_schemas(),
+            "tool_choice": "auto",
+            "reasoning_effort": "minimal",
+            "timeout": 600,
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        resp = client.chat.completions.create(**kwargs)
         msg = resp.choices[0].message
         print(
             f"    [turn {_turn}] finish={resp.choices[0].finish_reason} "
@@ -396,12 +399,12 @@ def main() -> None:
     ap.add_argument("--all", action="store_true", help="All questions in eval set")
     ap.add_argument("--model", default="deepseek-v4-flash")
     ap.add_argument("--base-url", default="https://api.deepseek.com/v1")
+    ap.add_argument("--max-tokens", type=int, default=None,
+                    help="max_tokens per completion (needed for LM Studio/Qwen; None = API default)")
     ap.add_argument("--out", default=str(WORKSPACE / "eval/results/run.jsonl"))
     args = ap.parse_args()
 
-    api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        sys.exit("set DEEPSEEK_API_KEY (or OPENAI_API_KEY)")
+    api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY") or "local"
     if OpenAI is None:
         sys.exit("openai package not installed (uv sync)")
 
@@ -441,6 +444,7 @@ def main() -> None:
         r = run_question(
             client, args.model, q["question"], q["id"],
             q.get("category", ""), meta,
+            max_tokens=args.max_tokens,
         )
         results.append(r)
         with open(out_path, "a") as f:
