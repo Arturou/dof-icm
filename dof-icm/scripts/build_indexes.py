@@ -26,16 +26,32 @@ DOC_RE = re.compile(
 )
 
 
-def extract_title(text: str, max_len: int = 90) -> str:
-    """Best-effort title from markdown: first heading or bold block."""
+def extract_title(text: str, max_len: int = 160) -> str:
+    """Best-effort descriptive title from markdown.
+
+    Prefers the ``##``-level heading (decrees/resolutions put their real
+    title there: ``## DECRETO por el que se expropia...``) over the
+    generic ``#`` institution banner (``# PODER EJECUTIVO``). Falls back
+    to the longest heading, then a bold block.
+    """
+    headings: list[tuple[int, str]] = []  # (level, text)
     for line in text.splitlines():
-        line = line.strip()
-        if not line:
+        s = line.strip()
+        if not s:
             continue
-        if line.startswith("#"):
-            return line.lstrip("# ").strip()[:max_len]
-        if line.startswith("**") and line.endswith("**"):
-            return line.strip("*").strip()[:max_len]
+        m = re.match(r"^(#{1,6})\s+(.+)$", s)
+        if m:
+            headings.append((len(m.group(1)), m.group(2).strip()))
+    if headings:
+        level2 = [t for lv, t in headings if lv == 2]
+        if level2:
+            return max(level2, key=len)[:max_len]
+        return max((t for _lv, t in headings), key=len)[:max_len]
+    # no markdown headings: fall back to a bold block
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("**") and s.endswith("**"):
+            return s.strip("*").strip()[:max_len]
     return ""
 
 

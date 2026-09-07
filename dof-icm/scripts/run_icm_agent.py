@@ -160,13 +160,15 @@ def call_tool(name: str, args: dict) -> dict:
             paths = sorted(INDEX.glob("titles-*.md"))
         pattern = args["pattern"]
         max_res = int(args.get("max_results", 10))
-        out = []
+        out: list[dict] = []
         for p in paths:
             if not p.exists():
                 continue
             try:
+                # no -m1: later matches (later dates) in the same file must
+                # also be returned
                 proc = subprocess.run(
-                    ["grep", "-im1", "-E", pattern, str(p)],
+                    ["grep", "-iE", pattern, str(p)],
                     capture_output=True, text=True, timeout=30,
                 )
             except subprocess.TimeoutExpired:
@@ -175,12 +177,14 @@ def call_tool(name: str, args: dict) -> dict:
                 if not line.strip():
                     continue
                 rel, _, title = line.partition("\t")
-                out.append({"relpath": rel, "title": title.strip()[:120]})
-                if len(out) >= max_res:
-                    break
-            if len(out) >= max_res:
-                break
-        return {"ok": True, "content": json.dumps(out, ensure_ascii=False)}
+                out.append({"relpath": rel, "title": title.strip()[:160]})
+        # rank: substantive DOF docs (the "001" decree, not *_AVISO_* notices)
+        # first, so real decrees aren't drowned out by company notices
+        out.sort(key=lambda m: ("_AVISO_" in m["relpath"], m["relpath"]))
+        return {
+            "ok": True,
+            "content": json.dumps(out[:max_res], ensure_ascii=False),
+        }
     if name == "grep_corpus":
         base = CORPUS
         if args.get("year"):
@@ -241,7 +245,7 @@ def call_tool(name: str, args: dict) -> dict:
     return {"ok": False, "error": f"unknown tool {name}"}
 
 
-def build_system_prompt(question: str) -> str:
+def build_system_prompt(question: str, meta: str = "") -> str:
     return f"""{load_text(LAYER0)}
 
 {load_text(LAYER1)}
@@ -280,13 +284,17 @@ cite the document relpath and line range.
    primary doc is enough; a second read is only for a genuinely missing detail.
 4. Skip *_AVISO_* files unless the question is about a notice/bid/edict.
 5. Answer within 8 model turns total (locate ~3, verify ~2, answer ~1).
+6. Anchor your search on the question's "as of" date and number of hops: if
+   the question is about events that happened BY that date, search the most
+   recent years/months first — do not wander into old years without evidence.
+{meta}
 
 Question: {question}
 """
 
 
-def run_question(client, model: str, question: str, qid: str = "", category: str = "") -> dict:
-    messages = [{"role": "system", "content": build_system_prompt(question)}]
+def run_question(client, model: str, question: str, qid: str = "", category: str = "", meta: str = "") -> dict:
+    messages = [{"role": "system", "content": build_system_prompt(question, meta)}]
     trace: list[dict] = []
     usage = {"input_tokens": 0, "output_tokens": 0}
     cap = max_turns_for(qid, category)
@@ -386,7 +394,20 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     for q in questions:
         print(f"==> {q['id']}: {q['question'][:80]}", flush=True)
-        r = run_question(client, args.model, q["question"], q["id"], q.get("category", ""))
+        # inject question metadata (as-of date, required hops, category) so
+        # the agent anchors its search in time instead of wandering years.
+        bits = []
+        if q.get("as_of"):
+            bits.append(f'Reference date ("as of"): {q["as_of"]}')
+        if q.get("required_hops"):
+            bits.append(f"Required hops (documents): {q['required_hops']}")
+        if q.get("category"):
+            bits.append(f"Category: {q['category']}")
+        meta = ("\n".join(f"6b. {b}" for b in bits)) if bits else ""
+        r = run_question(
+            client, args.model, q["question"], q["id"],
+            q.get("category", ""), meta,
+        )
         results.append(r)
         with open(out_path, "a") as f:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
