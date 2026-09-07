@@ -6,9 +6,11 @@
 >
 > - **[`dof-icm/`](dof-icm/README.md)** — *new, recommended.* A portable,
 >   file-based, RAG-free Q&A workspace over the Mexican *Diario Oficial de la
->   Federación* (DOF, 2024–2026). The corpus is plain markdown; retrieval is a
->   skill; no embeddings, no vector DB, no server. Ships a self-contained web
->   UI ([`dof-icm/web/`](dof-icm/web/README.md)) that answers with **your own
+>   Federación* (DOF, 2024–2026), built on the
+>   [Interpretable Context Methodology (ICM)](https://github.com/RinDig/Interpretable-Context-Methodology).
+>   The corpus is plain markdown; retrieval is a skill; no embeddings, no
+>   vector DB, no server. Ships a self-contained web UI
+>   ([`dof-icm/web/`](dof-icm/web/README.md)) that answers with **your own
 >   API key**.
 > - **[`dof-rag/`](dof-rag/README.md)** — *legacy.* The upstream full RAG
 >   project (657k docs, BM25 + binary vector index, tool-calling agent,
@@ -108,6 +110,17 @@ Su documentación completa vive en [`dof-rag/README.md`](dof-rag/README.md).
 |---|---|
 | `dof-icm` (default) | Estructura de este README: `dof-icm/` + `dof-rag/`. Activa. |
 | `main` | Espejo sin cambios del upstream `CodeandoGuadalajara/dof-rag` (para comparar o sincronizar). |
+
+## Metodología y referencias
+
+El workspace `dof-icm/` está construido sobre la metodología
+[**Interpretable Context Methodology (ICM)**](https://github.com/RinDig/Interpretable-Context-Methodology) —
+*"folder structure as agent architecture"*: capas de contexto (CLAUDE.md →
+CONTEXT.md → contratos de etapa → references/ → corpus), skills como
+conocimiento empaquetado y artefactos en texto plano como interfaz.
+
+- Metodología ICM: <https://github.com/RinDig/Interpretable-Context-Methodology>
+- Proyecto upstream (legacy en `dof-rag/`): <https://github.com/CodeandoGuadalajara/dof-rag>
 
 ## Licencia
 
