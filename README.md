@@ -104,6 +104,32 @@ Su documentación completa vive en [`dof-rag/README.md`](dof-rag/README.md).
 
 ---
 
+## Resultados de referencia (benchmarks)
+
+Puntuación del agente DOF-ICM (métricas ICM/doc-level: *doc-hit* = el relpath
+citado pertenece al conjunto gold, con manejo de ambigüedad; *semantic* =
+cifras clave de la respuesta de referencia presentes en la respuesta; *completed*
+= corrida terminó con respuesta). El **doc-hit es la métrica primaria**.
+
+| Set (en `dof-icm/eval/`) | Modelo | n | Doc-hit | Completed | Semantic | Reporte |
+|---|---|---|---|---|---|---|
+| `questions_fiscal.jsonl` — fiscal/SAT 2024–2026 | `deepseek-v4-flash` | 12 | **12/12 (100%)** | 12/12 (100%) | 10/12 (83%) | [`report-fiscal-deepseek.md`](dof-icm/eval/report-fiscal-deepseek.md) |
+| `questions_v2.jsonl` — general (44 preguntas) | `deepseek-v4-flash` | 44 | **40/44 (91%)** | 42/44 (95%) | 21/44 (48%) | [`report-benchmark-v2.md`](dof-icm/eval/report-benchmark-v2.md) |
+
+Notas:
+
+- Set fiscal: todas las citas gold verificadas verbatim contra el corpus.
+  Tres preguntas (FS-004/007/010, documentos largos/numéricos) requirieron
+  `DOF_MAX_TURNS=18` en el primer intento; con ello completaron y acertaron.
+- `semantic` es una heurística estricta (todas las cifras de la referencia
+  deben aparecer) y subestima cuando el modelo parafrasea cifras; los fallos
+  marcados en los reportes son de esa heurística, no de recuperación.
+- Reproducir: `python scripts/run_icm_agent.py --eval-json eval/questions_fiscal.jsonl --all`
+  y luego `python scripts/score_eval.py --questions … --results eval/results/…jsonl --tag …`
+  (desde `dof-icm/`).
+
+---
+
 ## Ramas
 
 | Rama | Contenido |

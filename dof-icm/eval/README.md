@@ -20,6 +20,17 @@ Year-scoped eval set for the file-based retrieval workspace.
 
 `eval/questions_fiscal.jsonl` — **12 preguntas fiscales/SAT** (2024–2026) orientadas a contribuyentes: persona física con actividad empresarial (deducción inmediata del Decreto "Plan México"), persona moral/tesorería (Ley de Ingresos, endeudamiento), contador/asesor fiscal (Resolución Miscelánea Fiscal 2025/2026 y sus modificaciones de julio 2026, reducción de multas, anexos). Misma taxonomía de 7 categorías; todas las citas gold verificadas verbatim contra el corpus. Corridas de referencia: `eval/results/fiscal_deepseek_v4_flash.jsonl`.
 
+## Resultados de referencia (scores)
+
+Corridas con `deepseek-v4-flash` (API). Métricas: *completed* (terminó con respuesta), *doc-hit* (relpath citado ∈ gold, ambiguity-aware), *semantic* (cifras clave de la referencia en la respuesta — heurística estricta, la métrica primaria es doc-hit).
+
+| Set | n | Doc-hit | Completed | Semantic | Reporte |
+|---|---|---|---|---|---|
+| `questions_fiscal.jsonl` (fiscal/SAT 2024–2026) | 12 | **12/12 (100%)** | 12/12 (100%) | 10/12 (83%) | [`report-fiscal-deepseek.md`](report-fiscal-deepseek.md) |
+| `questions_v2.jsonl` (general) | 44 | **40/44 (91%)** | 42/44 (95%) | 21/44 (48%) | [`report-benchmark-v2.md`](report-benchmark-v2.md) |
+
+El benchmark v2 comparó además `qwen/qwen3.8-27b` local (LM Studio) de forma **parcial** (24/44; la máquina 4090 se cayó dos veces) — ver caveats en `report-benchmark-v2.md`.
+
 ## Scoring (ICM-style, no chunks)
 
 The upstream v4 set scores chunk-level recall. ICM has no chunks — the retrieval unit is the **document**. Score each run on:
