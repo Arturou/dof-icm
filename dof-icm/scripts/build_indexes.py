@@ -26,7 +26,7 @@ DOC_RE = re.compile(
 )
 
 
-def extract_title(text: str, max_len: int = 160) -> str:
+def extract_title(text: str, max_len: int = 400) -> str:
     """Best-effort descriptive title from markdown.
 
     Prefers the ``##``-level heading (decrees/resolutions put their real

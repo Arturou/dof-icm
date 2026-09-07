@@ -177,7 +177,7 @@ def call_tool(name: str, args: dict) -> dict:
                 if not line.strip():
                     continue
                 rel, _, title = line.partition("\t")
-                out.append({"relpath": rel, "title": title.strip()[:160]})
+                out.append({"relpath": rel, "title": title.strip()[:400]})
         # rank: substantive DOF docs (not *_AVISO_* notices) first, and most
         # RECENT first (2026 before 2024), matching the prompt's "anchor on
         # as_of, search recent years first" guidance. relpath is

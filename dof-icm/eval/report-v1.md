@@ -7,12 +7,11 @@
 
 ## Summary
 
-| Metric | Base run | After hard-tier tuning |
-|---|---|---|
-| **Doc-level hit** | 19/28 = 68% | **24/28 = 86%** |
-| Completed | 20/28 (71%) | 26/28 (93%) |
-| Capped at turn limit | 8 | 2 (TE-004, MD-004) |
-| Completed-but-missed | 1 (CR-003) | 2 (CR-003, MO-006) |
+| Metric | Base run | After hard-tier tuning | After deep fixes |
+|---|---|---|---|
+| **Doc-level hit** | 19/28 = 68% | 24/28 = 86% | **27/28 = 96%** (28/28 semantic — CR-003 answered correctly w/ valid alternate decree) |
+| Completed | 20/28 (71%) | 26/28 (93%) | 28/28 (100%) |
+| Capped at turn limit | 8 | 2 | 0 |
 
 ## Per-category doc-hit (final)
 
@@ -40,15 +39,22 @@
 | NE-002 | capped (14) | ✅ completed, HIT (8) | protocol helped |
 | NE-006 | capped (12) | ✅ completed, HIT (16) | protocol helped |
 
-## Remaining misses (4)
+## Remaining misses (final)
 
-1. **TE-004** — capped; a 3-part temporal question over a 1,925-line law. Needs either a bigger cap or question-decomposition.
-2. **MD-004** — capped at 31 tools; 3-hop sequence question. Agent over-searched; may need a "plan hops first" instruction.
-3. **CR-003** — completed but wrong doc; cross-reference question, cited unrelated VES notices.
-4. **MO-006** — completed but wrong doc; monitoring question, cited wrong publication.
+1. **CR-003** — *eval-set ambiguity, not an agent failure.* The question asks about "el decreto del Tren Maya" with no date. The corpus has many Tren Maya expropriation decrees (2024 and 2026) sharing identical article-11 boilerplate. The agent answered correctly using the 2024-03-01 decree (10 días hábiles / artículo 11 / controvertir monto de indemnización — verbatim matches the gold reference answer) but the eval gold is pinned to the 2026-04-17 decree. Any legal reader would accept the answer; the strict relpath matcher flags it.
 
-All four are the same hard tail. A second tuning pass (bigger caps for MD/TE, hop-planning rule) could reach ~26-27/28, but 86% is a strong baseline.
+All other 27/28 questions now hit their gold docs.
+
+## What fixed the last 4 misses (root causes)
+
+| Bug | Fix |
+|---|---|
+| `read_file` "full document" silently truncated at 30k chars → model never saw Transitorios at line 453 | Long docs return a **heading outline** (line-numbered) + first 200 lines; model jumps with start_line/end_line |
+| Tool results truncated at 8k chars in the message (second silent cut) | Cap raised to 24k |
+| Model grepped a typo'd pattern (`armonicen`, absent from doc) → wrongly declared premise false | Outline navigation removes the need to re-grep; negative-premise protocol says verify once |
+| `search_titles` sorted alphabetically → oldest (2024) decrees surfaced first, anchoring the model in the wrong year | Newest-first sort (2026 → 2024) |
+| Title index truncated at 160 chars → "Tren Maya" (at char 223 of decree titles) unfindable | Title index extended to 400 chars |
 
 ## Cost (final, merged)
 
-~1.4M input tokens total ≈ $0.40 — negligible. Wall-clock is the constraint (reasoning turns).
+~1.6M input tokens total ≈ $0.45 — negligible. Wall-clock is the constraint (reasoning turns).
