@@ -6,6 +6,8 @@
 > [Interpretable Context Methodology](https://github.com/RinDig/Interpretable-Context-Methodology).
 > Drop the `dof-icm/` folder into any agent harness (Claude Code, Codex, DSH, …); the corpus is
 > plain markdown, retrieval is a skill, answers carry citations.
+> It also ships **a self-contained browser UI** ([`dof-icm/web/`](dof-icm/web/README.md)) — the
+> human-eval workflow from the upstream site, file-backed, answered with **your own API key**.
 > **The upstream dof-rag (full RAG stack) content below remains available on the `main` branch.**
 
 ---

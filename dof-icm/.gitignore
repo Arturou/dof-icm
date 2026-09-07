@@ -18,6 +18,10 @@ stages/*/output/*
 eval/results/*
 !eval/results/.gitkeep
 
+# Web UI runtime state (human-evaluation DB + local venv)
+web/var/
+web/.venv/
+
 # Setup config (may contain local preferences)
 setup/config.md
 

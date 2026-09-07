@@ -82,6 +82,28 @@ Agent (delivers):
   — 2025/12/09122025/MAT/006_DOF_20251209_MAT_5775533.md — lines 42–48
 ```
 
+## Web UI (optional)
+
+`web/` is a self-contained browser interface adapted from the upstream
+dof-rag human-evaluation site (Air + Clerk, MIT). It keeps the full workflow —
+auth, daily quota, review-before-ask, editorial publish queue, feedback, and a
+live tool-progress timeline — but every question is answered by this same
+file-based agent (`web/icm_executor.py` drives `scripts/icm_core.py`) over the
+`corpus/` files, using **your own API key / subscription**. No embeddings, no
+vector DB, no `dof_db`.
+
+```bash
+# from dof-icm/ (corpus/ + index already built; see Quickstart)
+python -m venv web/.venv
+web/.venv/bin/pip install -r web/requirements.txt
+export DEEPSEEK_API_KEY=sk-...            # or DOF_AGENT_API_KEY / OPENAI_API_KEY
+export DOF_LOCAL_PASSWORD='a-strong-password'   # local single-admin sign-in
+web/.venv/bin/python -m web.app           # http://127.0.0.1:8765
+```
+
+See [`web/README.md`](web/README.md) for the full env reference (provider,
+auth backends incl. Clerk, tuning knobs).
+
 ## Folder structure
 
 ```
@@ -115,6 +137,9 @@ dof-icm/
   eval/
     questions.jsonl             # Year-scoped eval set
     results/                    # Run outputs
+  web/                          # Optional browser UI (human-eval workflow)
+    app.py / icm_executor.py    # UI + file-backed executor
+    requirements.txt / README.md
 ```
 
 ## The 5-layer routing

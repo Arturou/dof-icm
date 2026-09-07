@@ -1,6 +1,6 @@
 # DOF-ICM Workspace
 
-Portable, file-based Q&A over the Mexican **Diario Oficial de la Federación** (DOF), 2024–2026. No embeddings, no vector DB, no server. The corpus is markdown files; retrieval is a skill the agent reads; answers are markdown with citations.
+Portable, file-based Q&A over the Mexican **Diario Oficial de la Federación** (DOF), 2024–2026. No embeddings, no vector DB, no server (the optional `web/` browser UI still uses the same file-based agent). The corpus is markdown files; retrieval is a skill the agent reads; answers are markdown with citations.
 
 ## Model
 
@@ -17,12 +17,13 @@ Portable, file-based Q&A over the Mexican **Diario Oficial de la Federación** (
 | `CLAUDE.md` | This file — Layer 0, always loaded |
 | `CONTEXT.md` | Layer 1 — task routing |
 | `corpus/` | Layer 4 — the DOF markdown corpus (2024–2026), one file per legal document |
-| `corpus/index/` | Navigation maps (by-year, by-section, recent) |
+| `corpus/index/` | Navigation maps (by-year, by-section, recent, titles) |
 | `stages/01-locate/` | Stage 1 — find candidate docs for a question |
 | `stages/02-verify/` | Stage 2 — read candidates, extract + verify the answer |
 | `skills/dof-retrieval/` | Bundled retrieval knowledge (SKILL.md + rules/) |
 | `setup/` | One-time onboarding (optional) |
 | `eval/` | Year-scoped eval set + run results |
+| `web/` | Optional browser UI — human-eval workflow over the file agent (`web/README.md`) |
 
 ## Routing table
 
@@ -31,6 +32,7 @@ Portable, file-based Q&A over the Mexican **Diario Oficial de la Federación** (
 | "Answer a question about Mexican law / DOF" | `stages/01-locate/CONTEXT.md` |
 | "Audit / improve a previous answer" | `stages/02-verify/CONTEXT.md` |
 | "Set up the workspace" | `setup/questionnaire.md` |
+| "Run the browser UI / human-eval site" | `web/README.md` |
 | "How do I use this in my harness?" | `README.md` |
 
 ## Conventions
