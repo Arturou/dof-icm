@@ -53,6 +53,9 @@ DEFAULT_MAX_TURNS = 8
 
 
 def max_turns_for(qid: str, category: str) -> int:
+    override = os.environ.get("DOF_MAX_TURNS")
+    if override:
+        return int(override)
     return MAX_TURNS_BY_CATEGORY.get(category, DEFAULT_MAX_TURNS)
 
 
@@ -327,14 +330,93 @@ Question: {question}
 """
 
 
+# Context budget: LM Studio / Qwen run on a fixed window (32k-64k). We estimate
+# tokens per message and COMPACT the conversation before it overflows, so a
+# long tool loop never crashes the local server. Env-tunable:
+#   DOF_CTX_WINDOW_TOKENS  total context window (default 56000, ~87% of 64k)
+#   DOF_CTX_COMPACT_AT     compact when estimated use passes this (default 0.60)
+#   DOF_TOOL_RESULT_CHARS  cap chars per tool result (default 24000)
+CTX_WINDOW = int(os.environ.get("DOF_CTX_WINDOW_TOKENS", "56000"))
+CTX_COMPACT_AT = float(os.environ.get("DOF_CTX_COMPACT_AT", "0.60"))
+TOOL_RESULT_CHARS = int(os.environ.get("DOF_TOOL_RESULT_CHARS", "24000"))
+
+
+def _est_tokens(messages: list[dict]) -> int:
+    """Rough token estimate (Spanish ~3 chars/token; be conservative /3)."""
+    total = 0
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, str):
+            total += max(1, len(c) // 3)
+        elif isinstance(c, list):
+            for part in c:
+                if isinstance(part, dict):
+                    total += len(str(part.get("text", ""))) // 3
+        for tc in m.get("tool_calls") or []:
+            # tc may be a pydantic object or a plain dict
+            args = getattr(tc, "function", None)
+            if isinstance(args, dict):
+                total += len(args.get("arguments") or "") // 3
+            elif args is not None:
+                total += len(getattr(args, "arguments", "") or "") // 3
+    return total
+
+
+def compact_messages(messages: list[dict], findings: list[str]) -> list[dict]:
+    """Drop the middle of the conversation, keep head + digest + current round.
+
+    Head: system + the seeded user turn. Digest: a synthesized assistant
+    summary of tool findings so far (relpaths, key numbers). Tail: the last
+    assistant tool-call round and its results, so in-flight tool ids stay
+    valid. Whole (assistant + tool) segments are dropped together — never a
+    dangling tool result.
+    """
+    head = messages[:2]
+    # index of the newest assistant message that issued tool_calls
+    idx = None
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("tool_calls"):
+            idx = i
+            break
+    if idx is None or idx <= 1:
+        return messages
+    tail = messages[idx:]
+    digest_body = "\n".join(findings[-25:]) if findings else "(ninguna búsqueda previa)"
+    digest = (
+        "Resumen de lo localizado y leído hasta ahora con herramientas "
+        "(conserva esto; el detalle completo fue compactado):\n" + digest_body
+    )
+    # keep the tail bounded (last ~8 messages) to cap growth between compactions
+    if len(tail) > 8:
+        tail = tail[-8:]
+    return head + [{"role": "assistant", "content": digest}] + tail
+
+
 def run_question(client, model: str, question: str, qid: str = "", category: str = "", meta: str = "", *, max_tokens: int | None = None) -> dict:
-    messages = [{"role": "system", "content": build_system_prompt(question, meta)}]
+    # System carries the workspace context + the question. Some local servers
+    # (LM Studio / Qwen jinja templates) require at least one user turn, so
+    # always seed a brief user message referencing the system prompt.
+    messages = [
+        {"role": "system", "content": build_system_prompt(question, meta)},
+        {"role": "user", "content": "Responde la pregunta del system prompt usando las herramientas disponibles. Sigue las reglas de eficiencia."},
+    ]
+    findings: list[str] = []
     trace: list[dict] = []
     usage = {"input_tokens": 0, "output_tokens": 0}
     cap = max_turns_for(qid, category)
+    compact_threshold = int(CTX_WINDOW * CTX_COMPACT_AT)
 
     for _turn in range(cap):
-        print(f"    [turn {_turn}/{cap}] calling API...", flush=True)
+        est = _est_tokens(messages)
+        if est > compact_threshold:
+            before = len(messages)
+            messages = compact_messages(messages, findings)
+            print(
+                f"    [ctx] compacted: ~{est/1000:.1f}k tokens, "
+                f"{before} -> {len(messages)} messages",
+                flush=True,
+            )
+        print(f"    [turn {_turn}/{cap}] calling API (~{_est_tokens(messages)/1000:.1f}k tokens)...", flush=True)
         kwargs: dict = {
             "model": model,
             "messages": messages,
@@ -371,11 +453,24 @@ def run_question(client, model: str, question: str, qid: str = "", category: str
             trace.append(
                 {"tool": tc.function.name, "args": args, "ok": result.get("ok", False)}
             )
+            # record a compact finding for the compaction digest
+            if result.get("ok"):
+                cont = result.get("content", "")
+                if tc.function.name in ("search_titles", "grep_corpus"):
+                    rels = [m.get("relpath", "") for m in (json.loads(cont) if cont.startswith("[") else [])][:6]
+                    findings.append(f"- {tc.function.name}({args.get('pattern','')[:60]}): {len(rels)} resultados: {', '.join(rels)}")
+                elif tc.function.name == "read_file":
+                    head = " ".join(cont.split())[:200]
+                    findings.append(f"- read_file {args.get('relpath','')}: {head}...")
+                else:
+                    findings.append(f"- {tc.function.name}({str(args)[:100]}): ok")
+            else:
+                findings.append(f"- {tc.function.name}({str(args)[:80]}): fallo")
             messages.append(
                 {
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": json.dumps(result, ensure_ascii=False)[:24000],
+                    "content": json.dumps(result, ensure_ascii=False)[:TOOL_RESULT_CHARS],
                 }
             )
     else:
