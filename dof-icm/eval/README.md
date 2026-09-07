@@ -47,10 +47,12 @@ Point the agent at this workspace with the recommended model config, and run eac
 
 Suggested smoke set (1 per category): SP-001, LI-002, TE-003, CR-005, MD-002, MO-005, NE-005.
 
-## Baselines
+## Baselines y comparativa
 
-- Upstream dof-rag v4 (full RAG, BM25+vectors, hybrid): MRR 0.339 / all-hop@20 0.595 (from `dof-rag/reports/eval_v4_retrieval.md`).
-- Compare apples-to-apples only on the 28 in-range questions; the upstream numbers are over all 42.
+- **Comparativa ICM vs RAG original:** [`report-icm-vs-rag.md`](report-icm-vs-rag.md) — mismas 56 preguntas y mismo corpus (2024–2026): el agente ICM cita el documento dorado en **52/56 (93%)**; el recuperador léxico clásico del RAG original (BM25 FTS5, una fila por documento — configuración favorable al baseline) lo coloca en su top-10 en **24/56 (43%)** y top-50 en **41/56 (73%)**, MRR 0.289. En las 28 preguntas compartidas con el eval v4 upstream: ICM 25/28 (89%) vs BM25 top-10 10/28 (36%).
+- Baseline reproducible: `python eval/bm25_baseline.py --corpus corpus --questions eval/questions_v2.jsonl eval/questions_fiscal.jsonl --db var/bm25_eval.sqlite --out eval/results/bm25_baseline.json` (resultados en `eval/results/bm25_baseline.json`, gitignored).
+- Upstream dof-rag v4 (RAG completo BM25+vectores+híbrido, corpus 1999–2026): MRR 0.339 / all-hop@20 0.595 / doc any-gold@10 0.476 sobre las 42 preguntas — métricas de **recuperación**, no end-to-end (de `dof-rag/dof-rag/reports/eval_v4_retrieval.md`).
+- Apples-to-apples solo en las 28 preguntas en rango; las cifras upstream son sobre las 42 (14 citan documentos 2006–2022, fuera del corpus ICM).
 
 ## Extending
 

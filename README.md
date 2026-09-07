@@ -128,6 +128,15 @@ Notas:
   y luego `python scripts/score_eval.py --questions … --results eval/results/…jsonl --tag …`
   (desde `dof-icm/`).
 
+**Comparativa con el RAG original** (`dof-rag/`, proyecto legacy): mismas 56
+preguntas y mismo corpus (2024–2026), el agente ICM cita el documento dorado en
+**52/56 (93%)**; el recuperador clásico del RAG original (BM25 FTS5, una fila
+por documento — favorable al baseline) lo coloca en su top-10 en 24/56 (43%) y
+top-50 en 41/56 (73%), MRR 0.289. En las 28 preguntas compartidas con el eval
+v4 upstream: ICM 25/28 (89%) vs BM25 top-10 10/28 (36%). Detalle, fallos
+transparentes y limitaciones en
+[`report-icm-vs-rag.md`](dof-icm/eval/report-icm-vs-rag.md).
+
 ---
 
 ## Ramas
