@@ -229,14 +229,33 @@ def call_tool(name: str, args: dict) -> dict:
         if end > len(lines):
             end = len(lines)
         chunk = "\n".join(lines[start:end])
-        # Long docs (>800 lines): return everything in ONE response so the
-        # agent never needs to re-read in chunks. 800 lines is ~well under
-        # the output window; the tool result is capped at 30k chars.
-        if len(lines) > 800 and not args.get("start_line"):
-            chunk = "\n".join(lines)
+
+        # Long docs: return a heading OUTLINE (with line numbers) + the
+        # requested section, so the agent can jump straight to e.g. the
+        # Transitorios instead of chunk-reading a 1,900-line decree.
+        if len(lines) > 400:
+            heads = []
+            for i, ln in enumerate(lines, 1):
+                s = ln.strip()
+                if s.startswith("#"):
+                    heads.append(f"l{i}: {s[:110]}")
+                if len(heads) > 60:
+                    break
+            if args.get("start_line") or args.get("end_line"):
+                # explicit range: just return it
+                return {
+                    "ok": True,
+                    "content": f"# {rel} (lines {start+1}-{end}, total {len(lines)})\n" + chunk,
+                }
+            # no range: return outline + first 200 lines
+            outline = "\n".join(heads) if heads else "(no markdown headings)"
             return {
                 "ok": True,
-                "content": f"# {rel} (FULL DOCUMENT, {len(lines)} lines)\n" + chunk[:30000],
+                "content": (
+                    f"# {rel} ({len(lines)} lines). HEADING OUTLINE (line numbers "
+                    f"refer to read_file start_line/end_line):\n{outline}\n\n"
+                    f"--- first 200 lines ---\n" + "\n".join(lines[:200])
+                ),
             }
         return {
             "ok": True,
@@ -282,6 +301,10 @@ cite the document relpath and line range.
 3. Do NOT re-verify figures by grepping them ("315.04", "440.87", etc.) — the
    read_file output you already have is the source of truth. One read of the
    primary doc is enough; a second read is only for a genuinely missing detail.
+   For long docs (400+ lines), read_file WITHOUT a line range returns a heading
+   outline with line numbers — use that to jump straight to the section you
+   need (e.g. "#### Transitorios"), then read_file with start_line/end_line.
+   Do NOT ask for the whole doc at once; the outline is the map.
 4. Skip *_AVISO_* files unless the question is about a notice/bid/edict.
 5. Answer within 8 model turns total (locate ~3, verify ~2, answer ~1).
 6. Anchor your search on the question's "as of" date and number of hops: if
@@ -338,7 +361,7 @@ def run_question(client, model: str, question: str, qid: str = "", category: str
                 {
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": json.dumps(result, ensure_ascii=False)[:8000],
+                    "content": json.dumps(result, ensure_ascii=False)[:24000],
                 }
             )
     else:
