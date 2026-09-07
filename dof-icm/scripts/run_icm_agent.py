@@ -178,9 +178,20 @@ def call_tool(name: str, args: dict) -> dict:
                     continue
                 rel, _, title = line.partition("\t")
                 out.append({"relpath": rel, "title": title.strip()[:160]})
-        # rank: substantive DOF docs (the "001" decree, not *_AVISO_* notices)
-        # first, so real decrees aren't drowned out by company notices
-        out.sort(key=lambda m: ("_AVISO_" in m["relpath"], m["relpath"]))
+        # rank: substantive DOF docs (not *_AVISO_* notices) first, and most
+        # RECENT first (2026 before 2024), matching the prompt's "anchor on
+        # as_of, search recent years first" guidance. relpath is
+        # YYYY/MM/DD/SECTION/..., so negating year/month/day sorts newest up.
+        def _rank(m: dict) -> tuple:
+            rel = m["relpath"]
+            return (
+                "_AVISO_" in rel,
+                -int(rel[0:4]),
+                -int(rel[5:7]),
+                -int(rel[8:10]),
+            )
+
+        out.sort(key=_rank)
         return {
             "ok": True,
             "content": json.dumps(out[:max_res], ensure_ascii=False),
