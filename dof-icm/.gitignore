@@ -6,6 +6,10 @@
 corpus/
 !corpus/index/.gitkeep
 
+# Conversion leftovers: quarantined HTML junk + retained failures
+dof_failed/
+!dof_failed/.gitkeep
+
 # Working artifacts — per-run outputs, never committed
 stages/*/output/*
 !stages/*/output/.gitkeep
