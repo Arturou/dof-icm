@@ -268,7 +268,9 @@ button:hover,.button:hover { background:var(--accent-dark); }
 .tag { background:#e5eee7; border-radius:99px; color:var(--accent-dark); display:inline-block;
   font-size:.78rem; font-weight:750; padding:.18rem .55rem; }
 .warning { background:#fff3e8; border-left:5px solid var(--warn); padding:.85rem 1rem; }
-.answer { font-family:Georgia,"Times New Roman",serif; font-size:1.14rem; white-space:pre-wrap; }
+.answer { font-family:Georgia,"Times New Roman",serif; font-size:1.14rem; }
+.answer.markdown-body { line-height:1.5; }
+.answer.markdown-body > :first-child { margin-top:0; }
 details { border-top:1px solid var(--line); padding:.8rem 0; }
 summary { cursor:pointer; font-weight:700; }
 pre { background:#18201c; color:#e9eee9; border-radius:3px; max-height:28rem; overflow:auto;
@@ -740,7 +742,7 @@ data-last-event-id="{_escape(last_event_id)}" aria-live="polite">
     timing_html = f" · {_escape(timing)}" if timing else ""
     return f"""<section id="run-status" data-state="succeeded" aria-live="polite">
 <section class="panel status"><p class="eyebrow">Respuesta terminada</p><h2>Respuesta</h2>{warning_html}
-<div class="answer">{_escape(answer.get("text", ""))}</div><p><strong>Citas:</strong> {citation_links}</p>
+<div class="answer markdown-body">{render_markdown_html(answer.get("text"))}</div><p><strong>Citas:</strong> {citation_links}</p>
 <p class="meta">Premisa: {_escape(answer.get("premise_status", "unknown"))}{timing_html}</p></section>
 <section class="panel"><h2>Proceso de investigación</h2>
 <p class="lede">El registro de decisiones y evidencia permanece disponible después de generar la respuesta.</p>
