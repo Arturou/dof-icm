@@ -1,3 +1,15 @@
+# dof-rag → DOF-ICM workspace
+
+> **Fork notice:** this repository is a fork of [CodeandoGuadalajara/dof-rag](https://github.com/CodeandoGuadalajara/dof-rag).
+> The default branch (`dof-icm`) adds **[`dof-icm/`](dof-icm/README.md)** — a portable, file-based,
+> RAG-free Q&A workspace over the DOF (2024–2026) built on the
+> [Interpretable Context Methodology](https://github.com/RinDig/Interpretable-Context-Methodology).
+> Drop the `dof-icm/` folder into any agent harness (Claude Code, Codex, DSH, …); the corpus is
+> plain markdown, retrieval is a skill, answers carry citations.
+> **The upstream dof-rag (full RAG stack) content below remains available on the `main` branch.**
+
+---
+
 # dof-rag
 
 dof-rag es un chat y un sistema de consulta por generación aumentada para explorar las ediciones del Diario Oficial de la Federación de México.
