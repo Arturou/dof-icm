@@ -386,10 +386,20 @@ def compact_messages(messages: list[dict], findings: list[str]) -> list[dict]:
         "Resumen de lo localizado y leído hasta ahora con herramientas "
         "(conserva esto; el detalle completo fue compactado):\n" + digest_body
     )
+    # Merge the digest into the FIRST retained assistant message's content.
+    # Do NOT insert a standalone assistant digest message: DeepSeek's
+    # thinking-mode validation rejects an extra assistant turn immediately
+    # before a tool-call turn ("reasoning_content must be passed back").
+    first = tail[0]
+    if first.get("role") == "assistant":
+        first = {**first, "content": digest + "\n\n" + (first.get("content") or "")}
+    else:
+        tail = [{"role": "assistant", "content": digest}] + tail
     # keep the tail bounded (last ~8 messages) to cap growth between compactions
+    tail = [first] + tail[1:]
     if len(tail) > 8:
         tail = tail[-8:]
-    return head + [{"role": "assistant", "content": digest}] + tail
+    return head + tail
 
 
 def run_question(client, model: str, question: str, qid: str = "", category: str = "", meta: str = "", *, max_tokens: int | None = None) -> dict:
@@ -437,11 +447,20 @@ def run_question(client, model: str, question: str, qid: str = "", category: str
         if resp.usage:
             usage["input_tokens"] += resp.usage.prompt_tokens or 0
             usage["output_tokens"] += resp.usage.completion_tokens or 0
-        messages.append(
-            {"role": "assistant", "content": msg.content or "", "tool_calls": msg.tool_calls}
-            if msg.tool_calls
-            else {"role": "assistant", "content": msg.content or ""}
-        )
+        if msg.tool_calls:
+            asm: dict = {
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": msg.tool_calls,
+            }
+            # DeepSeek thinking mode: reasoning_content must be echoed back on
+            # assistant tool-call turns (LM Studio/Qwen tolerate the extra key)
+            rc = getattr(msg, "reasoning_content", None)
+            if rc:
+                asm["reasoning_content"] = rc
+            messages.append(asm)
+        else:
+            messages.append({"role": "assistant", "content": msg.content or ""})
         if not msg.tool_calls:
             break
         for tc in msg.tool_calls:
