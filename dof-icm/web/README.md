@@ -49,8 +49,9 @@ export DOF_LOCAL_PASSWORD='choose-a-strong-password'
 web/.venv/bin/python -m web.app          # http://127.0.0.1:8765
 ```
 
-If you cloned the fork and already ran `uv sync` at the repo root, the same
-environment works: `cd dof-icm && uv run python -m web.app`.
+If you cloned the fork and already created the legacy python env
+(`cd dof-rag && uv sync`), you can run the UI with that interpreter too
+(from `dof-icm/`): `../dof-rag/.venv/bin/python -m web.app`.
 
 Open http://127.0.0.1:8765 → Entrar → password → ask a question. Watch the
 live tool timeline, then inspect the cited answer, the documents consulted and

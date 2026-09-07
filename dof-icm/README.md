@@ -27,24 +27,28 @@ Built on the [Interpretable Context Methodology (ICM)](https://github.com/RinDig
 
 ### 1. Get the corpus
 
-If `corpus/` is empty, run the one-shot builder (from the repo root). It downloads
-the `.doc` files, converts them to markdown, and produces the same optimized
-state as the reference build — HTML-junk cleanup, retries for large decrees,
-verified delete of `.doc`, and navigation indexes:
+If `corpus/` is empty, run the one-shot builder (from the repo root — the
+folder that contains `dof-icm/` and `dof-rag/`). It downloads the `.doc` files
+with the legacy dof-rag downloader, converts them to markdown, and produces
+the same optimized state as the reference build — HTML-junk cleanup, retries
+for large decrees, verified delete of `.doc`, and navigation indexes:
 
 ```bash
 # from the repo root (needs uv + LibreOffice + pandoc)
+cd dof-rag && uv sync && cd ..      # one-time: legacy python env
 dof-icm/scripts/setup.sh                      # full 2024-2026 corpus (~hours)
 dof-icm/scripts/setup.sh 01/01/2025 31/12/2025  # narrower range
 ```
 
 Under the hood this runs `dof-icm/scripts/build_corpus.py`, which mirrors the
-reference build pipeline exactly (see its header comment). The `.doc` sources
-are deleted only after each `.md` is verified, and any unconvertible files are
-kept under `dof-icm/dof_failed/` for inspection rather than silently lost.
+reference build pipeline exactly (see its header comment). It borrows the
+legacy downloader/converter from `dof-rag/`. The `.doc` sources are deleted
+only after each `.md` is verified, and any unconvertible files are kept under
+`dof-icm/dof_failed/` for inspection rather than silently lost.
 
-> (The older manual path — `uv run get_word_dof.py …` then
-> `convert_doc_to_md.py --input-dir ./dof_word --output-dir ./dof-icm/corpus`
+> (The older manual path — from inside `dof-rag/` after `uv sync`:
+> `uv run python get_word_dof.py 01/01/2024 31/12/2026` then
+> `uv run python convert_doc_to_md.py --input-dir ./dof_word --output-dir ../dof-icm/corpus`
 > then `rm -rf dof_word/` — is still available but does NOT reproduce the
 > reference quality: it deletes `.doc` files even when conversion failed.)
 

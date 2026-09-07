@@ -2,8 +2,8 @@
 """Build the DOF-ICM corpus to the same quality as the reference build.
 
 Reproduces the local pipeline exactly:
-  1. (optional) download DOF .doc files via the upstream get_word_dof.py
-  2. convert .doc -> .md with the repo converter (HTML-junk guard built in),
+  1. (optional) download DOF .doc files via the legacy dof-rag get_word_dof.py
+  2. convert .doc -> .md with the legacy converter (HTML-junk guard built in),
      in a parallel pass (workers)
   3. quarantine HTML error pages saved as .doc (never convertible) into
      <output_dir>/../dof_failed/html/ and DELETE them (they are junk)
@@ -14,9 +14,14 @@ Reproduces the local pipeline exactly:
   6. build navigation indexes (by-year / titles / by-section / recent)
   7. report counts
 
-Usage (from the repo root that contains pyproject.toml, after `uv sync`):
-    uv run python dof-icm/scripts/build_corpus.py \
-        [--start 01/01/2024] [--end 31/12/2026] [--workers 4] [--no-download]
+Layout (this repo):
+    dof-icm/   -> corpus + indexes land here (this script lives inside)
+    dof-rag/   -> legacy upstream project: get_word_dof.py, convert_doc_to_md.py
+                 and the python env (dof-rag/.venv) used to run them
+
+Usage (from the repo root, after `cd dof-rag && uv sync`):
+    dof-icm/scripts/setup.sh                      # full 2024-2026 build
+    dof-icm/scripts/setup.sh 01/01/2025 31/12/2025  # narrower range
 """
 
 from __future__ import annotations
@@ -29,15 +34,16 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-ICM = REPO_ROOT / "dof-icm"
+ICM = Path(__file__).resolve().parent.parent
+REPO_ROOT = ICM.parent
+LEGACY = REPO_ROOT / "dof-rag"  # legacy dof-rag project (get_word_dof / converter)
 CORPUS = ICM / "corpus"
-WORD_DIR = REPO_ROOT / "dof_word"
+WORD_DIR = LEGACY / "dof_word"
 FAILED_ROOT = ICM / "dof_failed"
 HTML_JUNK = FAILED_ROOT / "html"
 RETAINED = FAILED_ROOT / "retained_failures"
 
-sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(LEGACY))
 
 RETRY_LO_TIMEOUT = 1200  # seconds, for large .doc files
 RETRY_PANDOC_TIMEOUT = 1800
@@ -113,7 +119,7 @@ def download_docs(start: str, end: str) -> None:
         sys.executable, "get_word_dof.py", start, end,
         "--editions", "both", "--sleep-delay", "0.2",
     ]
-    subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+    subprocess.run(cmd, cwd=LEGACY, check=True)
 
 
 def main() -> None:
@@ -125,9 +131,12 @@ def main() -> None:
                     help="skip download; use existing dof_word/ .doc files")
     args = ap.parse_args()
 
-    # Sanity: deps of the upstream pipeline present
-    if not (REPO_ROOT / "pyproject.toml").exists():
-        sys.exit(f"run from the repo root containing pyproject.toml (found {REPO_ROOT})")
+    # Sanity: legacy dof-rag project (downloader + converter) present
+    if not (LEGACY / "pyproject.toml").exists():
+        sys.exit(
+            f"legacy dof-rag project not found under {LEGACY} — "
+            "clone/copy it (get_word_dof.py + convert_doc_to_md.py)"
+        )
     for exe in ("soffice", "pandoc"):
         if not shutil.which(exe):
             sys.exit(f"missing required executable: {exe} (brew install libreoffice pandoc)")

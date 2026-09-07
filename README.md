@@ -1,271 +1,119 @@
-# dof-rag → DOF-ICM workspace
+# DOF-ICM — Q&A sobre el Diario Oficial de la Federación (2024–2026)
 
-> **Fork notice:** this repository is a fork of [CodeandoGuadalajara/dof-rag](https://github.com/CodeandoGuadalajara/dof-rag).
-> The default branch (`dof-icm`) adds **[`dof-icm/`](dof-icm/README.md)** — a portable, file-based,
-> RAG-free Q&A workspace over the DOF (2024–2026) built on the
-> [Interpretable Context Methodology](https://github.com/RinDig/Interpretable-Context-Methodology).
-> Drop the `dof-icm/` folder into any agent harness (Claude Code, Codex, DSH, …); the corpus is
-> plain markdown, retrieval is a skill, answers carry citations.
-> It also ships **a self-contained browser UI** ([`dof-icm/web/`](dof-icm/web/README.md)) — the
-> human-eval workflow from the upstream site, file-backed, answered with **your own API key**.
-> **The upstream dof-rag (full RAG stack) content below remains available on the `main` branch.**
+> **English summary.** This repository (a fork of
+> [CodeandoGuadalajara/dof-rag](https://github.com/CodeandoGuadalajara/dof-rag))
+> hosts two related projects in two folders:
+>
+> - **[`dof-icm/`](dof-icm/README.md)** — *new, recommended.* A portable,
+>   file-based, RAG-free Q&A workspace over the Mexican *Diario Oficial de la
+>   Federación* (DOF, 2024–2026). The corpus is plain markdown; retrieval is a
+>   skill; no embeddings, no vector DB, no server. Ships a self-contained web
+>   UI ([`dof-icm/web/`](dof-icm/web/README.md)) that answers with **your own
+>   API key**.
+> - **[`dof-rag/`](dof-rag/README.md)** — *legacy.* The upstream full RAG
+>   project (657k docs, BM25 + binary vector index, tool-calling agent,
+>   human-evaluation site), kept intact as a reference snapshot.
+>
+> Default branch `dof-icm` has this layout; branch `main` mirrors the upstream
+> repository unchanged.
 
 ---
 
-# dof-rag
+## Estructura del repositorio
 
-dof-rag es un chat y un sistema de consulta por generación aumentada para explorar las ediciones del Diario Oficial de la Federación de México.
+```
+repo (rama dof-icm)
+├── dof-icm/        # Workspace nuevo: Q&A portable y file-based (ICM)
+├── dof-rag/        # Proyecto legacy: dof-rag upstream (RAG completo)
+├── README.md       # Este archivo
+├── LICENSE         # MIT (contenido heredado de Codeando Guadalajara)
+└── .gitignore      # corpus/, bases, .env, .venv, etc. (no versionados)
+```
 
-# Requerimientos
+| Carpeta | Qué es | Para quién | Documentación |
+|---|---|---|---|
+| `dof-icm/` | **Proyecto nuevo.** Workspace portable sobre el DOF 2024–2026: corpus en markdown, búsqueda por herramientas (grep/lectura), respuestas con citas. Incluye UI web autohospedable con tu propia API key. | Uso diario: preguntas al DOF con cualquier modelo (recomendado: DeepSeek) | [`dof-icm/README.md`](dof-icm/README.md) |
+| `dof-rag/` | **Proyecto legacy.** El repositorio upstream completo: pipelines de descarga/conversión, corpus + chunks + índices (BM25/vec0), agente de herramientas y el sitio de evaluación humana (Air + Clerk). | Referencia del proyecto original y de su infraestructura RAG | [`dof-rag/README.md`](dof-rag/README.md) |
 
-El proyecto usa Python 3.14 (fijado con [mise](https://mise.jdx.dev/)) y [uv](https://docs.astral.sh/uv/) para manejar las dependencias:
+---
+
+## dof-icm/ — el proyecto nuevo (recomendado)
+
+Q&A **sin RAG**: no hay embeddings ni base vectorial. El corpus son archivos
+`.md` organizados por `YYYY/MM/FECHA/SECCIÓN/`; el agente lee la metodología
+[ICM](https://github.com/RinDig/Interpretable-Context-Methodology) (carpetas
+como arquitectura, contratos por etapa, skills de recuperación) y responde con
+citas exactas (relpath + líneas + fecha + sección).
+
+### Distribución de la carpeta
+
+| Ruta (dentro de `dof-icm/`) | Función |
+|---|---|
+| `corpus/` | El DOF 2024–2026 en markdown (~52k documentos; se genera con `scripts/setup.sh`, no está versionado). `corpus/index/` tiene los mapas de navegación. |
+| `CLAUDE.md`, `CONTEXT.md` | Capas 0–1 de contexto del workspace (mapa y enrutado de tareas). |
+| `stages/01-locate/`, `stages/02-verify/` | Contratos de las etapas: localizar candidatos y verificar la respuesta, con `references/` (formato de cita, calidad de respuesta). |
+| `skills/dof-retrieval/` | Skill de recuperación (`SKILL.md` + `rules/*.md`). |
+| `scripts/` | `run_icm_agent.py` (CLI), `icm_core.py` (núcleo compartido con la UI), `build_corpus.py` + `setup.sh` (construcción del corpus) e `build_indexes.py`. |
+| `web/` | **UI web** autohospedable: el flujo de evaluación humana del proyecto legacy adaptado a búsqueda file-based, con tu propia API key (ver `web/README.md`). |
+| `eval/` | Set de evaluación (44 preguntas, 7 categorías) + resultados. |
+| `setup/` | Cuestionario de arranque (opcional). |
+
+**Uso rápido**
 
 ```bash
-mise install # Python 3.14
-uv sync      # Crear el entorno virtual y sincronizar dependencias
+# 1) corpus (una vez; desde la raíz del repo)
+cd dof-rag && uv sync && cd ..        # entorno python legacy (descarga/conversión)
+dof-icm/scripts/setup.sh              # construye dof-icm/corpus (~horas)
+
+# 2) UI web con tu propia API key (DeepSeek por defecto)
+cd dof-icm
+python -m venv web/.venv && web/.venv/bin/pip install -r web/requirements.txt
+export DEEPSEEK_API_KEY=sk-... DOF_LOCAL_PASSWORD=...
+web/.venv/bin/python -m web.app       # http://127.0.0.1:8765
 ```
 
-## Bajar archivos del DOF
+Más detalle en [`dof-icm/README.md`](dof-icm/README.md) y
+[`dof-icm/web/README.md`](dof-icm/web/README.md).
 
-### Archivos PDF
+---
 
-Para bajar archivos PDF del DOF se usa el script `get_dof.py`:
+## dof-rag/ — el proyecto legacy
 
-```bash
-uv run get_dof.py --help
-uv run get_dof.py --start-year=2025 --end-year=2023
-```
+Snapshot del proyecto upstream **[CodeandoGuadalajara/dof-rag](https://github.com/CodeandoGuadalajara/dof-rag)**:
+stack RAG completo sobre el DOF — descarga y conversión a markdown, ~657k
+documentos / 6.7M chunks, índice BM25 (FTS5) y vectorial (embeddings binarios
+jina-v5 + `sqlite-vec`), agente con herramientas (léxico / vectorial / híbrido)
+y el sitio de **evaluación humana** (Air + Clerk) en `human_eval/`.
 
-Esto crea directorios como:
+Se conserva como **referencia** del proyecto original y de dónde salieron las
+ideas y el código del que `dof-icm` se deriva:
 
-```
-dof/
-├── 2025/
-│   ├── 01/
-│   │   ├── 02012025-MAT.pdf
-│   │   ├── 03012025-MAT.pdf
-...
-```
+- `dof-icm/scripts/build_corpus.py` usa el descargador y conversor de
+  `dof-rag/` (`get_word_dof.py`, `convert_doc_to_md.py`).
+- `dof-icm/web/` es una adaptación file-based de `dof-rag/human_eval/`
+  (misma UI, mismo flujo de evaluación; otro motor de respuestas).
 
-### Archivos Word (.doc) — disponible desde 1999
+Sobre el snapshot se conservan dos parches locales menores: un guard que
+rechaza artefactos `.doc` que en realidad son HTML (en `convert_doc_to_md.py`)
+y un provider `deepseek` opcional en el executor de `human_eval/`. Todo lo
+demás es idéntico al upstream.
 
-Los archivos del DOF también están disponibles en formato Word (.doc), lo cual facilita la extracción de texto.
+Su documentación completa vive en [`dof-rag/README.md`](dof-rag/README.md).
 
-Para bajarlos se usa el script `get_word_dof.py`:
+---
 
-```bash
-uv run get_word_dof.py --help
-uv run get_word_dof.py --start-year=2025 --end-year=2023
-```
+## Ramas
 
-Esto crea directorios como:
+| Rama | Contenido |
+|---|---|
+| `dof-icm` (default) | Estructura de este README: `dof-icm/` + `dof-rag/`. Activa. |
+| `main` | Espejo sin cambios del upstream `CodeandoGuadalajara/dof-rag` (para comparar o sincronizar). |
 
-```
-dof_word/
-├── 2025/
-│   ├── 01/
-│   │   ├── 02012025/
-│   │   │   ├── MAT/
-│   │   │   │   └── 001_DOF_20250102_MAT_5746544.doc
-│   │   │   └── VES/
-│   │   │       └── 001_DOF_20250102_VES_5746544.doc
-...
-```
+## Licencia
 
-> **NOTA**: El script descarga un archivo .doc por cada documento legal individual (no por edición completa).
-
-## Extraer markdown
-
-Hay dos métodos de extracción dependiendo del tipo de archivo:
-
-### Desde archivos Word (.doc) — 1999 en adelante
-
-El script `convert_doc_to_md.py` convierte archivos `.doc` directamente a Markdown, manteniendo cada documento legal como un archivo individual — ideal para chunking y recuperación en RAG.
-
-**Requisitos adicionales:**
-- LibreOffice (`soffice`) — para conversión .doc → .docx
-- pandoc — para conversión .docx → .md
-
-```bash
-# Convertir todos los años
-python convert_doc_to_md.py --input-dir ./dof_word --output-dir ./dof_md
-
-# Años específicos
-python convert_doc_to_md.py --years 2020 2021 --workers 4
-
-# Ver progreso sin convertir
-python convert_doc_to_md.py --dry-run
-
-# Reintentar archivos fallidos
-python convert_doc_to_md.py --retry-failed
-```
-
-**Rendimiento:**
-- ~9-10 archivos/segundo con 4 workers
-- Tasa de fallo < 0.02% con reintentos automáticos
-- Reanudable: omite archivos ya convertidos
-
-**Estructura de salida:**
-
-```
-dof_md/
-├── 2025/
-│   ├── 01/
-│   │   ├── 02012025/
-│   │   │   ├── MAT/
-│   │   │   │   └── 001_DOF_20250102_MAT_5746544.md
-│   │   │   └── VES/
-│   │   │       └── 001_DOF_20250102_VES_5746544.md
-...
-```
-
-### Desde PDFs escaneados — antes de 1999
-
-Los archivos del DOF anteriores a 1999 solo están disponibles como PDFs escaneados (imagen), por lo que requieren OCR. El script `extract_markdown.py` usa Gemini 2.0 Flash para extraer texto:
-
-```bash
-uv run extract_markdown.py --help
-```
-
-Los archivos Word (.doc) solo están disponibles desde 1999, por lo que los documentos anteriores requieren este método alternativo.
-
-**Requisito:** Configurar la variable de entorno `GOOGLE_API_KEY` con una clave de Google AI.
-
-### Desde PDFs digitales — alternativa
-
-Para PDFs digitales (no escaneados), se puede usar [marker](https://github.com/VikParuchuri/marker):
-
-```bash
-marker --output_dir dof_markdown/2024/04/ \
-  --paginate_output \
-  --languages="es" \
-  --skip_existing \
-  --workers=1 \
-  dof/2024/04/
-```
-
-## Extraer embeddings
-
-Para extraer embeddings de un archivo específico:
-
-```bash
-python extract_embeddings.py dof_markdown/2024/04/
-```
-
-Puedes especificar la carpeta de un solo archivo, o la carpeta de un mes, o incluso la carpeta de un año.
-
-## Corpus e índices (estado actual)
-
-El corpus completo ya está construido: 657,867 documentos, 6.73 millones de chunks, índice BM25 (FTS5), embeddings binarios (jina-v5, 1,024 bits por chunk) y el índice vec0 para búsqueda vectorial. La guía de construcción está en `docs/full-corpus-build.md`; las bases derivadas viven en `dof_db/` y no se versionan.
-
-## Agente y evaluación
-
-- `agent_tools/`: agente de herramientas (buscar documentos, buscar evidencia, leer chunks) con recuperación léxica, vectorial o híbrida sobre las bases de `dof_db/`.
-- Evaluación de recuperación v4 (42 preguntas curadas a mano, 7 categorías, métricas multi-hop):
-
-  ```bash
-  uv run python scripts/eval_v4_full.py
-  ```
-
-  Reporte en `reports/eval_v4_retrieval.md` y resultados deterministas versionados en `eval/cache/eval_v4_full_comparison.json`. Resultado final: la fusión híbrida supera a BM25 puro (MRR 0.339 contra 0.221; all-hop@20 0.595 contra 0.429).
-- Evaluación del agente completo: `uv run python scripts/eval_v4_agent.py --provider kimi-code --model kimi-for-coding` (también `--provider llama-server --model <id>` contra un servidor local OpenAI-compatible, por defecto `http://127.0.0.1:8080/v1`).
-
-## Sitio de evaluación humana
-
-Aplicación web (Air + Clerk) en `human_eval/` para que personas formulen preguntas reales al agente y evalúen las respuestas.
-
-Queremos evolucionar este piloto hacia un servicio público que pueda usar
-modelos locales o autohospedados en hardware accesible, desde Apple Silicon
-hasta equipos con tarjetas NVIDIA. El
-[roadmap de producción](docs/production-roadmap.md) explica las prioridades y
-señala tareas en las que otras personas pueden contribuir.
-
-El modo de recuperación por defecto es `lexical`. Para usar el índice vec0 y
-embeddings GGUF, configura `DOF_RETRIEVAL_MODE=hybrid`.
-
-```bash
-set -a; source .env; set +a  # CLERK_* y DOF_SESSION_SECRET (nunca imprimir valores)
-export DOF_AGENT_PROVIDER=kimi-code DOF_AGENT_MODEL=kimi-for-coding \
-  DOF_RETRIEVAL_MODE=hybrid DOF_WEB_HOST=0.0.0.0 DOF_WEB_PORT=8765
-uv run python -m human_eval.app  # http://127.0.0.1:8765
-```
-
-También se puede usar un modelo local mediante un servidor compatible con la
-API de OpenAI. La configuración probada en Apple Silicon usa Qwen3.8-27B con
-llama.cpp `llama-server`: un solo slot, 32K de contexto y razonamiento
-conservado entre turnos de herramientas.
-
-```bash
-llama-server -hf unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M \
-  --jinja --alias qwen3.8 --reasoning-preserve -c 32768 -np 1
-```
-
-Qwen3.8 usa razonamiento `xhigh` por defecto. El agente envía
-`reasoning_effort=low` en cada petición para evitar sobre-razonamiento en el
-bucle de hasta ocho turnos; se puede cambiar con `DOF_REASONING_EFFORT` a
-`medium` o `xhigh`. Esta elección sigue la recomendación de empezar con
-razonamiento bajo de [Simon Willison](https://simonwillison.net/2026/Aug/16/qwen-38-27b/)
-y el soporte nativo descrito en la
-[ficha oficial de Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B).
-Otros servidores compatibles pueden ignorar o rechazar ese parámetro; configura
-`DOF_REASONING_EFFORT=` para omitirlo.
-
-Con el servidor escuchando en `http://127.0.0.1:8080/` (verifica el id con
-`curl -s localhost:8080/v1/models`):
-
-```bash
-set -a; source .env; set +a
-export DOF_AGENT_PROVIDER=llama-server DOF_AGENT_MODEL=qwen3.8 \
-  DOF_REASONING_EFFORT=low DOF_RETRIEVAL_MODE=hybrid \
-  DOF_WEB_HOST=0.0.0.0 DOF_WEB_PORT=8765
-uv run python -m human_eval.app
-```
-
-- `DOF_AGENT_PROVIDER=llama-server` usa el endpoint de Chat Completions de `DOF_AGENT_BASE_URL` (por defecto `http://127.0.0.1:8080/v1`). No requiere API key; si la sirves con autenticación, pásala por `DOF_AGENT_API_KEY`.
-- El modelo de chat local usa el puerto 8080 y el servidor de embeddings del
-  modo `hybrid` usa `DOF_EMBED_PORT` (8086 por defecto). Pueden correr a la vez,
-  pero la aplicación rechaza configuraciones donde ambos intenten usar el mismo
-  puerto local.
-
-- Visitantes anónimos leen las respuestas publicadas. Con cuenta: 1 pregunta cada 24 h (`DOF_DAILY_QUESTION_LIMIT`) y hay que evaluar una respuesta publicada antes de cada pregunta, incluida la primera. Los administradores publican y despublican en `/admin/queue` (rol vía `public_metadata.role = "admin"` en el dashboard de Clerk).
-- Recuperación híbrida para preguntas en vivo: `DOF_RETRIEVAL_MODE=hybrid` (requiere el índice vec0 y `DOF_GGUF_MODEL`; el servidor de embeddings llama-server se levanta una sola vez por proceso, con `DOF_EMBED_PORT`, por defecto 8086).
-- Sembrar respuestas publicadas con corridas reales del agente (incluye la línea de tiempo de progreso):
-
-  ```bash
-  uv run python scripts/seed_human_eval_v4_hybrid.py --replace
-  ```
-
-- HTTPS dentro de la tailnet (necesario para OAuth de Google/GitHub fuera de localhost): `tailscale serve --bg 8765`.
-- La base de evaluación (`var/human_evaluation.sqlite`) es independiente del corpus y los índices; conserva respaldos antes de resembrar.
-
-## Pruebas
-
-```bash
-uv run python -m unittest discover -s tests -q
-uv run ruff check human_eval tests
-```
-
-## Estructura del proyecto
-
-```
-.
-├── agent_tools/          # Agente de herramientas y recuperación (BM25 / vector / híbrida)
-├── corpus_store/         # Construcción del corpus: chunks, embeddings, vec0
-├── human_eval/           # Sitio de evaluación humana (Air + Clerk)
-├── eval/                 # Sets de evaluación (v2, v3, v4) y caché de resultados
-├── scripts/              # Pipelines de evaluación y sembrado (eval_v4_*, seed_*)
-├── tests/                # Pruebas unitarias (unittest)
-├── docs/                 # Documentación canónica (corpus, evaluación, UI)
-├── reports/              # Reportes de evaluación
-├── dof_db/               # Bases derivadas (no versionadas)
-├── get_dof.py            # Descarga archivos PDF del DOF
-├── get_word_dof.py       # Descarga archivos Word (.doc) del DOF (1999+)
-├── convert_doc_to_md.py  # Convierte .doc → .md (pipeline individual)
-├── extract_markdown.py   # Extrae texto de PDFs escaneados con Gemini (pre-1999)
-├── extract_embeddings.py # Extrae embeddings para RAG
-├── ai_agent.ipynb        # Notebook del agente de consulta
-├── pandoc_filters/       # Filtros Lua para pandoc
-├── modules_captions/     # Módulo de descripción de imágenes
-├── pyproject.toml        # Dependencias del proyecto
-└── README.md
-```
+- Contenido heredado del upstream (`dof-rag/`, UI adaptada en `dof-icm/web/`):
+  **MIT**, © 2025 Codeando Guadalajara (ver [`LICENSE`](LICENSE)).
+- Código nuevo del workspace `dof-icm/`: **MIT**.
+- El corpus del DOF es de **dominio público** (publicado por el gobierno
+  mexicano); las respuestas del agente son generadas por un modelo de lenguaje
+  y no constituyen asesoría legal.

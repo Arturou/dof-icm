@@ -3,9 +3,9 @@
 # corpus/vector dependencies: no sqlite-vec, no sentence-transformers, no
 # marker-pdf. Python 3.13+.
 #
-# Install either into the repo env (uv sync at the repo root) or a dedicated
-# venv:
-#   cd <workspace>/web && python -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Install into a dedicated venv (see web/README.md) or reuse the legacy env
+# (../dof-rag/.venv, created with `cd ../dof-rag && uv sync`):
+#   python -m venv .venv && .venv/bin/pip install -r requirements.txt
 air>=0.48.1
 uvicorn>=0.35,<1
 starlette>=0.47
