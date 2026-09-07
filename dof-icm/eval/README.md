@@ -16,6 +16,10 @@ Year-scoped eval set for the file-based retrieval workspace.
 | monitoring | 3 | What was published on a given date |
 | negative_false_premise | 5 | Reject a false premise; answer correctly |
 
+`eval/questions_v2.jsonl` — **44 questions** (the same set, extended: adds 16 hand-picked 2024–2026 questions and an `ambiguity`/`valid_alternatives` schema for decrees that share identical text).
+
+`eval/questions_fiscal.jsonl` — **12 preguntas fiscales/SAT** (2024–2026) orientadas a contribuyentes: persona física con actividad empresarial (deducción inmediata del Decreto "Plan México"), persona moral/tesorería (Ley de Ingresos, endeudamiento), contador/asesor fiscal (Resolución Miscelánea Fiscal 2025/2026 y sus modificaciones de julio 2026, reducción de multas, anexos). Misma taxonomía de 7 categorías; todas las citas gold verificadas verbatim contra el corpus. Corridas de referencia: `eval/results/fiscal_deepseek_v4_flash.jsonl`.
+
 ## Scoring (ICM-style, no chunks)
 
 The upstream v4 set scores chunk-level recall. ICM has no chunks — the retrieval unit is the **document**. Score each run on:
